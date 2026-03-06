@@ -1,0 +1,21 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# .NET build artifacts
+bin/
+obj/
+
+# MAUI / Xamarin local artifacts
+*.csproj.user
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
