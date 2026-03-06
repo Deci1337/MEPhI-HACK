@@ -18,6 +18,7 @@ namespace MassangerMaximka
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<string> _chatLog = [];
         private int _techLogCount;
+        private volatile bool _suppressTechLog;
 
         public MainPage()
         {
@@ -228,11 +229,25 @@ namespace MassangerMaximka
             TechLog(LogCat.Protocol, $"SENT id={msg.MessageId} status={msg.Status}");
         }
 
+        private void OnClearChatClicked(object? sender, EventArgs e)
+        {
+            _chatLog.Clear();
+            ChatLogLabel.Text = "";
+        }
+
         private void OnClearLogsClicked(object? sender, EventArgs e)
         {
-            TechLogStack.Children.Clear();
-            _techLogCount = 0;
-            LogCountLabel.Text = "";
+            _suppressTechLog = true;
+            try
+            {
+                var children = TechLogStack.Children.ToList();
+                foreach (var child in children)
+                    TechLogStack.Children.Remove(child);
+                _techLogCount = 0;
+                LogCountLabel.Text = "";
+            }
+            catch { }
+            finally { _suppressTechLog = false; }
         }
 
         // --- Logging ---
@@ -246,6 +261,7 @@ namespace MassangerMaximka
 
         private void TechLog(LogCat cat, string text)
         {
+            if (_suppressTechLog) return;
             var color = cat switch
             {
                 LogCat.Encryption => Color.FromArgb("#00C853"),   // bright green
@@ -281,12 +297,16 @@ namespace MassangerMaximka
                 LineBreakMode = LineBreakMode.TailTruncation
             };
 
-            TechLogStack.Children.Add(label);
-            _techLogCount++;
-            while (TechLogStack.Children.Count > 200)
-                TechLogStack.Children.RemoveAt(0);
-            LogCountLabel.Text = $"({_techLogCount} entries)";
-            _ = TechLogScrollView.ScrollToAsync(0, TechLogStack.Height, false);
+            try
+            {
+                TechLogStack.Children.Add(label);
+                _techLogCount++;
+                while (TechLogStack.Children.Count > 200)
+                    TechLogStack.Children.RemoveAt(0);
+                LogCountLabel.Text = $"({_techLogCount} entries)";
+                _ = TechLogScrollView.ScrollToAsync(0, TechLogStack.Height, false);
+            }
+            catch { }
         }
 
         // --- Helpers ---

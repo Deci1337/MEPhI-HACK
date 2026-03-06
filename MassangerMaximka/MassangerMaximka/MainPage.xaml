@@ -28,9 +28,10 @@
 
                 <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="Gray" FontSize="12" />
 
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
                     <Entry x:Name="MessageEntry" Placeholder="Type message..." Grid.Column="0" FontSize="13" />
                     <Button Text="Send" Grid.Column="1" Clicked="OnSendClicked" FontSize="12" Padding="8,4" />
+                    <Button Text="Clear" Grid.Column="2" Clicked="OnClearChatClicked" FontSize="11" Padding="6,4" BackgroundColor="#555" />
                 </Grid>
 
                 <Frame BorderColor="LightGray" Padding="8" HeightRequest="140">
