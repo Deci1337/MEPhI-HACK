@@ -3,6 +3,7 @@ using HexTeam.Messenger.Core.Discovery;
 using HexTeam.Messenger.Core.FileTransfer;
 using HexTeam.Messenger.Core.Metrics;
 using HexTeam.Messenger.Core.Models;
+using HexTeam.Messenger.Core.Security;
 using HexTeam.Messenger.Core.Services;
 using HexTeam.Messenger.Core.Storage;
 using HexTeam.Messenger.Core.Transport;
@@ -30,6 +31,10 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(sp =>
             new HandshakeVerifier(sp.GetRequiredService<NodeIdentity>()));
+
+        services.AddSingleton<KeyExchangeService>();
+        services.AddSingleton<E2EEncryptionService>();
+        services.AddSingleton<PacketRateLimiter>();
 
         services.AddSingleton(sp =>
             new RelayService(
