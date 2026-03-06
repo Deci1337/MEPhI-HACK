@@ -9,13 +9,13 @@ namespace HexTeam.Messenger.Core.Discovery;
 
 public sealed class UdpDiscoveryService : IDisposable
 {
-    private const int DiscoveryPort = 45678;
     private static readonly TimeSpan BeaconInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan PeerTimeout = TimeSpan.FromSeconds(10);
 
     private readonly string _nodeId;
     private readonly string _displayName;
     private readonly int _tcpPort;
+    private readonly int _discoveryPort;
     private readonly bool _isRelay;
     private readonly ILogger<UdpDiscoveryService> _logger;
     private readonly ConcurrentDictionary<string, PeerInfo> _peers = new();
@@ -28,11 +28,12 @@ public sealed class UdpDiscoveryService : IDisposable
 
     public IReadOnlyDictionary<string, PeerInfo> Peers => _peers;
 
-    public UdpDiscoveryService(string nodeId, string displayName, int tcpPort, bool isRelay, ILogger<UdpDiscoveryService> logger)
+    public UdpDiscoveryService(string nodeId, string displayName, int tcpPort, int discoveryPort, bool isRelay, ILogger<UdpDiscoveryService> logger)
     {
         _nodeId = nodeId;
         _displayName = displayName;
         _tcpPort = tcpPort;
+        _discoveryPort = discoveryPort;
         _isRelay = isRelay;
         _logger = logger;
     }
@@ -42,14 +43,14 @@ public sealed class UdpDiscoveryService : IDisposable
         _cts = new CancellationTokenSource();
         _udpClient = new UdpClient();
         _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, DiscoveryPort));
+        _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, _discoveryPort));
         _udpClient.EnableBroadcast = true;
 
         _ = SendBeaconsAsync(_cts.Token);
         _ = ReceiveBeaconsAsync(_cts.Token);
         _ = PruneStaleAsync(_cts.Token);
 
-        _logger.LogInformation("Discovery started on port {Port}, nodeId={NodeId}", DiscoveryPort, _nodeId);
+        _logger.LogInformation("Discovery started on port {Port}, nodeId={NodeId}", _discoveryPort, _nodeId);
     }
 
     public void Stop()
@@ -78,7 +79,7 @@ public sealed class UdpDiscoveryService : IDisposable
     {
         var beacon = new DiscoveryBeacon(_nodeId, _displayName, _tcpPort, _isRelay);
         var data = JsonSerializer.SerializeToUtf8Bytes(beacon);
-        var broadcastEp = new IPEndPoint(IPAddress.Broadcast, DiscoveryPort);
+        var broadcastEp = new IPEndPoint(IPAddress.Broadcast, _discoveryPort);
 
         while (!ct.IsCancellationRequested)
         {

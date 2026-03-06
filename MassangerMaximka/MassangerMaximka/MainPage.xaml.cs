@@ -47,7 +47,9 @@ namespace MassangerMaximka
             _connections.PeerDisconnected += OnPeerDisconnected;
             _chat.MessageReceived += OnMessageReceived;
 
-            StatusLabel.Text = $"Node: {_discovery.Peers.Count} peers | TCP: {_connections.ListenPort}";
+            StatusLabel.Text = $"TCP: {_connections.ListenPort} | Peers: {_discovery.Peers.Count}";
+            var otherPort = _connections.ListenPort == 45680 ? 45681 : 45680;
+            PortHintLabel.Text = $"Your port: {_connections.ListenPort}. Connect to other: 127.0.0.1:{otherPort}";
             RefreshPeersList();
         }
 
@@ -65,7 +67,7 @@ namespace MassangerMaximka
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 RefreshPeersList();
-                StatusLabel.Text = $"Peers: {_peers.Count} | TCP: {_connections?.ListenPort ?? 0}";
+                StatusLabel.Text = $"TCP: {_connections?.ListenPort ?? 0} | Peers: {_peers.Count}";
             });
         }
 
@@ -96,12 +98,21 @@ namespace MassangerMaximka
         private void RefreshPeersList()
         {
             _peers.Clear();
-            if (_discovery == null) return;
-            foreach (var p in _discovery.Peers.Values)
-            {
-                var conn = _connections?.IsConnected(p.NodeId) == true ? " [OK]" : "";
-                _peers.Add($"{p.DisplayName} ({p.NodeId}){conn}");
-            }
+            var seen = new HashSet<string>();
+            if (_discovery != null)
+                foreach (var p in _discovery.Peers.Values)
+                {
+                    seen.Add(p.NodeId);
+                    var conn = _connections?.IsConnected(p.NodeId) == true ? " [OK]" : "";
+                    _peers.Add($"{p.DisplayName} ({p.NodeId}){conn}");
+                }
+            if (_connections != null)
+                foreach (var nodeId in _connections.Connections.Keys)
+                {
+                    if (seen.Contains(nodeId)) continue;
+                    seen.Add(nodeId);
+                    _peers.Add($"Peer ({nodeId}) [OK]");
+                }
             PeersLabel.Text = $"Peers: {_peers.Count}";
         }
 
