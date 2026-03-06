@@ -28,8 +28,10 @@ namespace MassangerMaximka
         private string? _selectedPeerNodeId;
         private string? _lastTransferId;
         private string? _lastReceivedVoicePath;
+#pragma warning disable CS0649, CS0169
         private bool _isRecordingVoice;
         private string? _voiceRecordPath;
+#pragma warning restore CS0649, CS0169
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
         private readonly List<string> _chatLog = [];

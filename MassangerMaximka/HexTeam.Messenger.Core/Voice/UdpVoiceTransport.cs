@@ -7,6 +7,7 @@ namespace HexTeam.Messenger.Core.Voice;
 
 public sealed class UdpVoiceTransport : IDisposable
 {
+    private const int VoicePort = 45679;
     private const int FrameSize = 960;
     private const int JitterBufferSize = 5;
 
