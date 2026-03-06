@@ -57,7 +57,7 @@ public static class ServiceCollectionExtensions
                 nodeGuid));
 
         services.AddSingleton(sp =>
-            new UdpDiscoveryService(config.NodeId, config.DisplayName, config.TcpPort, config.IsRelay,
+            new UdpDiscoveryService(config.NodeId, config.DisplayName, config.TcpPort, config.DiscoveryPort, config.IsRelay,
                 sp.GetRequiredService<ILogger<UdpDiscoveryService>>()));
 
         services.AddSingleton(sp =>

@@ -7,6 +7,7 @@
     <ScrollView>
         <VerticalStackLayout Padding="20" Spacing="15">
             <Label x:Name="StatusLabel" Text="Starting..." FontAttributes="Bold" />
+            <Label x:Name="PortHintLabel" Text="" TextColor="Gray" FontSize="12" />
             <Label x:Name="PeersLabel" Text="Peers: 0" />
             <CollectionView x:Name="PeersList" HeightRequest="120" SelectionMode="Single"
                             SelectionChanged="OnPeerSelected">
@@ -17,7 +18,7 @@
                 </CollectionView.ItemTemplate>
             </CollectionView>
 
-            <Label Text="Manual connect (IP:port):" />
+            <Label Text="Manual connect (IP:port, e.g. 127.0.0.1:45680):" />
             <Grid ColumnDefinitions="*,Auto">
                 <Entry x:Name="ManualIpEntry" Placeholder="192.168.1.10:45680" Grid.Column="0" />
                 <Button x:Name="ConnectBtn" Text="Connect" Grid.Column="1" Clicked="OnConnectClicked" />
