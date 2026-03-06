@@ -1,7 +1,10 @@
+using HexTeam.Messenger.Core.Abstractions;
 using HexTeam.Messenger.Core.Discovery;
 using HexTeam.Messenger.Core.FileTransfer;
 using HexTeam.Messenger.Core.Metrics;
 using HexTeam.Messenger.Core.Models;
+using HexTeam.Messenger.Core.Services;
+using HexTeam.Messenger.Core.Storage;
 using HexTeam.Messenger.Core.Transport;
 using HexTeam.Messenger.Core.Voice;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +20,41 @@ public static class ServiceCollectionExtensions
     {
         config ??= new NodeConfiguration();
         services.AddSingleton(config);
+
+        var nodeGuid = Guid.TryParse(config.NodeId, out var g) ? g : Guid.NewGuid();
+        var identity = new NodeIdentity(nodeGuid, config.DisplayName);
+        services.AddSingleton(identity);
+
+        services.AddSingleton<ISeenPacketStore, InMemorySeenPacketStore>();
+        services.AddSingleton<IMessageStore, InMemoryMessageStore>();
+
+        services.AddSingleton(sp =>
+            new HandshakeVerifier(sp.GetRequiredService<NodeIdentity>()));
+
+        services.AddSingleton(sp =>
+            new RelayService(
+                sp.GetRequiredService<ISeenPacketStore>(),
+                sp.GetRequiredService<ITransport>(),
+                nodeGuid));
+
+        services.AddSingleton(sp =>
+            new RetryPolicy(
+                sp.GetRequiredService<ITransport>(),
+                sp.GetRequiredService<IMessageStore>()));
+
+        services.AddSingleton(sp =>
+            new MessageSyncService(
+                sp.GetRequiredService<IMessageStore>(),
+                sp.GetRequiredService<ITransport>(),
+                nodeGuid));
+
+        services.AddSingleton(sp =>
+            new PacketRouter(
+                sp.GetRequiredService<RelayService>(),
+                sp.GetRequiredService<RetryPolicy>(),
+                sp.GetRequiredService<MessageSyncService>(),
+                sp.GetRequiredService<IMessageStore>(),
+                nodeGuid));
 
         services.AddSingleton(sp =>
             new UdpDiscoveryService(config.NodeId, config.DisplayName, config.TcpPort, config.IsRelay,

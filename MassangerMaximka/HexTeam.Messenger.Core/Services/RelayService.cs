@@ -35,17 +35,19 @@ public sealed class RelayService
     public async Task ProcessAsync(Envelope envelope, Guid receivedFromNodeId, CancellationToken ct = default)
     {
         var decision = ShouldRelay(envelope, receivedFromNodeId);
-
         if (decision == RelayDecision.Forward)
-        {
-            var forwarded = envelope.WithNextHop(_localNodeId);
-            var peers = _transport.GetConnectedPeers()
-                .Where(p => p != receivedFromNodeId && p != envelope.OriginNodeId)
-                .ToList();
+            await ForwardAsync(envelope, receivedFromNodeId, ct);
+    }
 
-            foreach (var peer in peers)
-                await _transport.SendAsync(forwarded, peer, ct);
-        }
+    public async Task ForwardAsync(Envelope envelope, Guid receivedFromNodeId, CancellationToken ct = default)
+    {
+        var forwarded = envelope.WithNextHop(_localNodeId);
+        var peers = _transport.GetConnectedPeers()
+            .Where(p => p != receivedFromNodeId && p != envelope.OriginNodeId)
+            .ToList();
+
+        foreach (var peer in peers)
+            await _transport.SendAsync(forwarded, peer, ct);
     }
 }
 
