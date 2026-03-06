@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using HexTeam.Messenger.Core.Discovery;
 using HexTeam.Messenger.Core.FileTransfer;
@@ -30,6 +31,7 @@ namespace MassangerMaximka
         private bool _isRecordingVoice;
         private string? _voiceRecordPath;
         private readonly ObservableCollection<string> _peers = [];
+        private readonly List<SavedPeer> _savedPeers = [];
         private readonly List<string> _chatLog = [];
         private int _techLogCount;
         private volatile bool _suppressTechLog;
@@ -44,6 +46,7 @@ namespace MassangerMaximka
         {
             InitializeComponent();
             PeersList.ItemsSource = _peers;
+            LoadSavedPeers();
         }
 
         protected override void OnAppearing()
@@ -113,6 +116,7 @@ namespace MassangerMaximka
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
+                RememberPeer(peer.DisplayName, peer.IpAddress, peer.Port);
                 RefreshPeersList();
                 StatusLabel.Text = $"TCP: {_connections?.ListenPort ?? 0} | Peers: {_peers.Count}";
                 TechLog(LogCat.Discovery, $"Peer discovered: {peer.DisplayName} ({peer.NodeId}) at {peer.EndPoint}");
@@ -223,30 +227,64 @@ namespace MassangerMaximka
         {
             _peers.Clear();
             var seen = new HashSet<string>();
+            var seenEndpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (_discovery != null)
                 foreach (var kv in _discovery.Peers)
                 {
+                    if (!seenEndpoints.Add(kv.Value.EndPoint)) continue;
                     seen.Add(kv.Key);
-                    var conn = _connections?.IsConnected(kv.Key) == true ? " [OK]" : "";
-                    _peers.Add($"{kv.Value.DisplayName} ({kv.Key}){conn}");
+                    var isSaved = _savedPeers.Any(p => string.Equals(p.EndPoint, kv.Value.EndPoint, StringComparison.OrdinalIgnoreCase));
+                    var isConnected = _connections?.IsConnected(kv.Key) == true;
+                    _peers.Add(FormatPeerDisplay(kv.Value.DisplayName, kv.Key, kv.Value.EndPoint, isSaved, true, isConnected));
                 }
             if (_connections != null)
                 foreach (var nodeId in _connections.Connections.Keys)
                 {
                     if (seen.Contains(nodeId)) continue;
                     seen.Add(nodeId);
-                    _peers.Add($"Peer ({nodeId}) [OK]");
+                    _peers.Add(FormatPeerDisplay("Peer", nodeId, "", false, false, true));
                 }
+            foreach (var peer in _savedPeers.OrderBy(p => p.DisplayName).ThenBy(p => p.EndPoint))
+            {
+                if (seenEndpoints.Contains(peer.EndPoint)) continue;
+                _peers.Add(FormatPeerDisplay(peer.DisplayName, null, peer.EndPoint, true, false, false));
+            }
             PeersLabel.Text = $"Peers: {_peers.Count}";
         }
 
         private void OnPeerSelected(object? sender, SelectionChangedEventArgs e)
         {
             if (e.CurrentSelection.FirstOrDefault() is not string s) return;
-            var start = s.IndexOf('(') + 1;
-            var end = s.IndexOf(')');
-            _selectedPeerNodeId = start > 0 && end > start ? s[start..end] : null;
+            _selectedPeerNodeId = ExtractNodeId(s);
+            var savedEndPoint = ExtractEndPoint(s);
+            if (!string.IsNullOrWhiteSpace(savedEndPoint))
+                ManualIpEntry.Text = savedEndPoint;
             SelectedPeerLabel.Text = $"Selected: {_selectedPeerNodeId ?? "(none)"}";
+        }
+
+        private async void OnPeerDoubleTapped(object? sender, TappedEventArgs e)
+        {
+            if (sender is not Label label)
+                return;
+
+            var endPointText = ExtractEndPoint(label.Text);
+            if (string.IsNullOrWhiteSpace(endPointText))
+                return;
+
+            ManualIpEntry.Text = endPointText;
+            if (!ParseEndpoint(endPointText, out var ip, out var port))
+                return;
+
+            if (_connections == null || _discovery == null)
+                return;
+
+            var nodeId = ExtractNodeId(label.Text) ?? $"manual-{ip}:{port}";
+            RememberPeer($"Manual {ip}", ip.ToString(), port);
+            _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
+            TechLog(LogCat.Network, $"Double-tap connect -> {ip}:{port}");
+            var ok = await _connections.ConnectToPeerAsync(nodeId, new IPEndPoint(ip, port));
+            AppendChat(ok ? $"[Connected] {nodeId}" : $"[Failed] {nodeId}");
+            RefreshPeersList();
         }
 
         // --- Actions ---
@@ -260,6 +298,7 @@ namespace MassangerMaximka
                 AppendChat("[Error] Invalid IP:port");
                 return;
             }
+            RememberPeer($"Manual {ip}", ip.ToString(), port);
             var nodeId = $"manual-{ip}:{port}";
             _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
             TechLog(LogCat.Network, $"Connecting to {ip}:{port}...");
@@ -469,6 +508,15 @@ namespace MassangerMaximka
             PlayVoiceFile(path);
         }
 
+        private void OnForgetSavedPeersClicked(object? sender, EventArgs e)
+        {
+            _savedPeers.Clear();
+            SaveSavedPeers();
+            RefreshPeersList();
+            AppendChat("[Peers] Saved peers cleared");
+            TechLog(LogCat.System, "Saved peers list cleared");
+        }
+
         private void PlayVoiceFile(string path)
         {
 #if WINDOWS
@@ -599,6 +647,31 @@ namespace MassangerMaximka
             return s > 0 && e > s ? display[s..e] : null;
         }
 
+        private static string? ExtractEndPoint(string display)
+        {
+            var s = display.LastIndexOf('[') + 1;
+            var e = display.LastIndexOf(']');
+            return s > 0 && e > s ? display[s..e] : null;
+        }
+
+        private static string FormatPeerDisplay(
+            string displayName,
+            string? nodeId,
+            string endPoint,
+            bool isSaved,
+            bool isOnline,
+            bool isConnected)
+        {
+            var parts = new List<string>();
+            if (isSaved) parts.Add("saved");
+            if (isOnline) parts.Add("online");
+            if (isConnected) parts.Add("connected");
+            var status = parts.Count == 0 ? "" : $"[{string.Join(" | ", parts)}] ";
+            var node = string.IsNullOrWhiteSpace(nodeId) ? "" : $" ({nodeId})";
+            var ep = string.IsNullOrWhiteSpace(endPoint) ? "" : $" [{endPoint}]";
+            return $"{status}{displayName}{node}{ep}";
+        }
+
         private string? GetSelectedOrFirstPeerNodeId()
         {
             if (!string.IsNullOrEmpty(_selectedPeerNodeId))
@@ -654,6 +727,52 @@ namespace MassangerMaximka
             return string.Compare(_localNodeId, remoteNodeId, StringComparison.Ordinal) < 0;
         }
 
+        private void LoadSavedPeers()
+        {
+            try
+            {
+                if (!File.Exists(SavedPeersPath))
+                    return;
+                var json = File.ReadAllText(SavedPeersPath);
+                var peers = JsonSerializer.Deserialize<List<SavedPeer>>(json);
+                if (peers == null)
+                    return;
+                _savedPeers.Clear();
+                _savedPeers.AddRange(peers
+                    .Where(p => !string.IsNullOrWhiteSpace(p.IpAddress) && p.Port > 0)
+                    .DistinctBy(p => p.EndPoint));
+            }
+            catch
+            {
+            }
+        }
+
+        private void SaveSavedPeers()
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(SavedPeersPath)!);
+                var json = JsonSerializer.Serialize(_savedPeers.OrderBy(p => p.DisplayName).ThenBy(p => p.EndPoint));
+                File.WriteAllText(SavedPeersPath, json);
+            }
+            catch
+            {
+            }
+        }
+
+        private void RememberPeer(string displayName, string ipAddress, int port)
+        {
+            if (string.IsNullOrWhiteSpace(ipAddress) || port <= 0)
+                return;
+            var existing = _savedPeers.FindIndex(p => p.IpAddress.Equals(ipAddress, StringComparison.OrdinalIgnoreCase) && p.Port == port);
+            var peer = new SavedPeer(string.IsNullOrWhiteSpace(displayName) ? ipAddress : displayName, ipAddress, port);
+            if (existing >= 0)
+                _savedPeers[existing] = peer;
+            else
+                _savedPeers.Add(peer);
+            SaveSavedPeers();
+        }
+
         private static async Task<string> PickOrCreateTestFileAsync()
         {
             try
@@ -686,6 +805,14 @@ namespace MassangerMaximka
             Random.Shared.NextBytes(buffer);
             await File.WriteAllBytesAsync(path, buffer);
             return path;
+        }
+
+        private static string SavedPeersPath =>
+            Path.Combine(FileSystem.Current.AppDataDirectory, "saved-peers.json");
+
+        private sealed record SavedPeer(string DisplayName, string IpAddress, int Port)
+        {
+            public string EndPoint => $"{IpAddress}:{Port}";
         }
 
         private enum LogCat { System, Network, Transport, Protocol, Discovery, Encryption, Metrics, Relay }

@@ -16,14 +16,19 @@
                                 SelectionChanged="OnPeerSelected">
                     <CollectionView.ItemTemplate>
                         <DataTemplate>
-                            <Label Text="{Binding}" Padding="4" FontSize="12" />
+                            <Label Text="{Binding}" Padding="4" FontSize="12">
+                                <Label.GestureRecognizers>
+                                    <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
+                                </Label.GestureRecognizers>
+                            </Label>
                         </DataTemplate>
                     </CollectionView.ItemTemplate>
                 </CollectionView>
 
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
                     <Entry x:Name="ManualIpEntry" Placeholder="IP:port (e.g. 127.0.0.1:45680)" Grid.Column="0" FontSize="13" />
                     <Button Text="Connect" Grid.Column="1" Clicked="OnConnectClicked" FontSize="12" Padding="8,4" />
+                    <Button Text="Forget Saved" Grid.Column="2" Clicked="OnForgetSavedPeersClicked" FontSize="11" Padding="8,4" BackgroundColor="#6D4C41" />
                 </Grid>
 
                 <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="Gray" FontSize="12" />
