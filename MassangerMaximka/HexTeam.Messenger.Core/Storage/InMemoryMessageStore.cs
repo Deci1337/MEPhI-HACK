@@ -18,6 +18,8 @@ public sealed class InMemoryMessageStore : IMessageStore
             .OrderBy(m => m.SentAtUtc)
             .ToList();
 
+    public IReadOnlyList<ChatMessage> GetAll() => _messages.Values.ToList();
+
     public IReadOnlyList<Guid> GetMessageIds(Guid sessionId) =>
         _messages.Values
             .Where(m => m.SessionId == sessionId)

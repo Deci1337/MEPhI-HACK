@@ -2,6 +2,7 @@ using HexTeam.Messenger.Core.Models;
 using HexTeam.Messenger.Core.Protocol;
 using HexTeam.Messenger.Core.Services;
 using HexTeam.Messenger.Core.Storage;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
 
 namespace HexTeam.Messenger.Tests;
@@ -20,7 +21,10 @@ public class PacketRouterTests
         var relay = new RelayService(seenStore, transport, localNode);
         var retry = new RetryPolicy(transport, msgStore);
         var sync = new MessageSyncService(msgStore, transport, localNode);
-        var router = new PacketRouter(relay, retry, sync, msgStore, localNode);
+        var identity = new NodeIdentity(localNode, "test");
+        var verifier = new HandshakeVerifier(identity);
+        var logger = NullLogger<PacketRouter>.Instance;
+        var router = new PacketRouter(relay, retry, sync, msgStore, verifier, logger, localNode);
         return (router, transport, msgStore);
     }
 
@@ -150,5 +154,183 @@ public class PacketRouterTests
 
         Assert.Single(decisions);
         Assert.Equal(RelayDecision.Deliver, decisions[0]);
+    }
+
+    [Fact]
+    public async Task Rejects_packet_with_empty_PacketId()
+    {
+        var (router, _, _) = CreateRouter(NodeB, NodeA);
+        int count = 0;
+        router.ChatMessageReceived += _ => count++;
+
+        var envelope = new Envelope
+        {
+            PacketId = Guid.Empty,
+            OriginNodeId = NodeA,
+            CurrentSenderNodeId = NodeA,
+            TargetNodeId = NodeB,
+            PacketType = PacketType.ChatEnvelope,
+            Payload = JsonSerializer.SerializeToUtf8Bytes(new ChatPacket { Text = "bad" })
+        };
+
+        await router.HandleIncomingAsync(envelope, NodeA);
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task Rejects_packet_with_empty_OriginNodeId()
+    {
+        var (router, _, _) = CreateRouter(NodeB, NodeA);
+        int count = 0;
+        router.ChatMessageReceived += _ => count++;
+
+        var envelope = new Envelope
+        {
+            OriginNodeId = Guid.Empty,
+            CurrentSenderNodeId = NodeA,
+            TargetNodeId = NodeB,
+            PacketType = PacketType.ChatEnvelope,
+            Payload = JsonSerializer.SerializeToUtf8Bytes(new ChatPacket { Text = "bad" })
+        };
+
+        await router.HandleIncomingAsync(envelope, NodeA);
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task Rejects_self_originated_packet_with_zero_hops()
+    {
+        var (router, _, _) = CreateRouter(NodeB, NodeA);
+        int count = 0;
+        router.ChatMessageReceived += _ => count++;
+
+        var envelope = new Envelope
+        {
+            OriginNodeId = NodeB,
+            CurrentSenderNodeId = NodeB,
+            TargetNodeId = NodeB,
+            HopCount = 0,
+            PacketType = PacketType.ChatEnvelope,
+            Payload = JsonSerializer.SerializeToUtf8Bytes(new ChatPacket { Text = "self" })
+        };
+
+        await router.HandleIncomingAsync(envelope, NodeA);
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task Handles_malformed_payload_without_crash()
+    {
+        var (router, _, _) = CreateRouter(NodeB, NodeA);
+        int count = 0;
+        router.ChatMessageReceived += _ => count++;
+
+        var envelope = new Envelope
+        {
+            OriginNodeId = NodeA,
+            CurrentSenderNodeId = NodeA,
+            TargetNodeId = NodeB,
+            PacketType = PacketType.ChatEnvelope,
+            Payload = "{{not valid json"u8.ToArray()
+        };
+
+        await router.HandleIncomingAsync(envelope, NodeA);
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task Unknown_PacketType_is_rejected()
+    {
+        var (router, _, _) = CreateRouter(NodeB, NodeA);
+        var routed = new List<RelayDecision>();
+        router.PacketRouted += (d, _) => routed.Add(d);
+
+        var envelope = new Envelope
+        {
+            OriginNodeId = NodeA,
+            CurrentSenderNodeId = NodeA,
+            TargetNodeId = NodeB,
+            PacketType = (PacketType)255,
+            Payload = []
+        };
+
+        await router.HandleIncomingAsync(envelope, NodeA);
+        Assert.Empty(routed);
+    }
+
+    [Fact]
+    public async Task MissingRequest_triggers_resend()
+    {
+        var (router, transport, msgStore) = CreateRouter(NodeB, NodeA);
+        var sessionId = Guid.NewGuid();
+        var msgId = Guid.NewGuid();
+
+        msgStore.Add(new ChatMessage
+        {
+            MessageId = msgId,
+            SessionId = sessionId,
+            SenderNodeId = NodeB,
+            Text = "stored message",
+            SentAtUtc = DateTimeOffset.UtcNow
+        });
+
+        var req = new MissingRequestPacket
+        {
+            SessionId = sessionId,
+            MissingMessageIds = [msgId]
+        };
+        var envelope = new Envelope
+        {
+            OriginNodeId = NodeA,
+            CurrentSenderNodeId = NodeA,
+            TargetNodeId = NodeB,
+            PacketType = PacketType.MissingRequest,
+            Payload = JsonSerializer.SerializeToUtf8Bytes(req)
+        };
+
+        await router.HandleIncomingAsync(envelope, NodeA);
+
+        Assert.Single(transport.Sent);
+        Assert.Equal(PacketType.ChatEnvelope, transport.Sent[0].Envelope.PacketType);
+        Assert.Equal(NodeA, transport.Sent[0].Target);
+    }
+
+    [Fact]
+    public async Task OnPeerReconnected_sends_inventory()
+    {
+        var (router, transport, _) = CreateRouter(NodeB, NodeA);
+        var sessionId = Guid.NewGuid();
+
+        await router.OnPeerReconnectedAsync(NodeA, sessionId);
+
+        Assert.Single(transport.Sent);
+        Assert.Equal(PacketType.Inventory, transport.Sent[0].Envelope.PacketType);
+    }
+
+    [Fact]
+    public void TrackForAck_tracks_chat_packets()
+    {
+        var (router, _, _) = CreateRouter(NodeA, NodeB);
+        var envelope = MakeChatEnvelope(NodeA, NodeB);
+
+        router.TrackForAck(envelope, NodeB);
+    }
+
+    [Fact]
+    public void RequiresAck_true_for_ChatEnvelope()
+    {
+        Assert.True(ProtocolConstants.RequiresAck(PacketType.ChatEnvelope));
+    }
+
+    [Fact]
+    public void RequiresAck_false_for_Ack()
+    {
+        Assert.False(ProtocolConstants.RequiresAck(PacketType.Ack));
+    }
+
+    [Fact]
+    public void RequiresAck_false_for_Inventory()
+    {
+        Assert.False(ProtocolConstants.RequiresAck(PacketType.Inventory));
     }
 }

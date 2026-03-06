@@ -3,15 +3,19 @@ using System.Collections.Concurrent;
 
 namespace HexTeam.Messenger.Core.Storage;
 
-public sealed class InMemorySeenPacketStore : ISeenPacketStore
+public sealed class InMemorySeenPacketStore : ISeenPacketStore, IDisposable
 {
     private readonly ConcurrentDictionary<Guid, DateTimeOffset> _seen = new();
     private readonly TimeSpan _ttl = TimeSpan.FromSeconds(ProtocolConstants.SeenPacketCacheDuration);
+    private readonly Timer _pruneTimer;
 
-    public bool TryMarkSeen(Guid packetId)
+    public InMemorySeenPacketStore()
     {
-        return _seen.TryAdd(packetId, DateTimeOffset.UtcNow);
+        var interval = TimeSpan.FromSeconds(ProtocolConstants.SeenPacketPruneIntervalSeconds);
+        _pruneTimer = new Timer(_ => Prune(), null, interval, interval);
     }
+
+    public bool TryMarkSeen(Guid packetId) => _seen.TryAdd(packetId, DateTimeOffset.UtcNow);
 
     public bool HasSeen(Guid packetId) => _seen.ContainsKey(packetId);
 
@@ -24,4 +28,8 @@ public sealed class InMemorySeenPacketStore : ISeenPacketStore
                 _seen.TryRemove(key, out _);
         }
     }
+
+    public int Count => _seen.Count;
+
+    public void Dispose() => _pruneTimer.Dispose();
 }

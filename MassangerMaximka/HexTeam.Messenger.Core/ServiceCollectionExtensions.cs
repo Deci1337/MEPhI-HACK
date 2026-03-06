@@ -59,6 +59,8 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<RetryPolicy>(),
                 sp.GetRequiredService<MessageSyncService>(),
                 sp.GetRequiredService<IMessageStore>(),
+                sp.GetRequiredService<HandshakeVerifier>(),
+                sp.GetRequiredService<ILogger<PacketRouter>>(),
                 nodeGuid));
 
         services.AddSingleton(sp =>

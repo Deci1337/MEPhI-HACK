@@ -59,6 +59,33 @@ public sealed class MessageSyncService
         await _transport.SendAsync(envelope, targetNodeId, ct);
     }
 
+    public async Task ResendMessagesAsync(Guid requesterNodeId, IReadOnlyList<Guid> requestedIds, CancellationToken ct = default)
+    {
+        foreach (var msgId in requestedIds)
+        {
+            var msg = FindMessageById(msgId);
+            if (msg == null) continue;
+
+            var chat = new ChatPacket
+            {
+                MessageId = msg.MessageId,
+                Text = msg.Text,
+                SentAtUtc = msg.SentAtUtc
+            };
+
+            var envelope = BuildEnvelope(
+                PacketType.ChatEnvelope, msg.SessionId, requesterNodeId,
+                System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(chat));
+
+            await _transport.SendAsync(envelope, requesterNodeId, ct);
+        }
+    }
+
+    private ChatMessage? FindMessageById(Guid messageId)
+    {
+        return _messageStore.GetAll().FirstOrDefault(m => m.MessageId == messageId);
+    }
+
     private Envelope BuildEnvelope(PacketType type, Guid sessionId, Guid targetNodeId, byte[] payload)
         => new()
         {
