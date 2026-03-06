@@ -9,9 +9,7 @@ using HexTeam.Messenger.Core.Models;
 using HexTeam.Messenger.Core.Metrics;
 using HexTeam.Messenger.Core.Transport;
 using HexTeam.Messenger.Core.Voice;
-#if WINDOWS
-using System.Runtime.InteropServices;
-#endif
+using Plugin.Maui.Audio;
 
 namespace MassangerMaximka
 {
@@ -23,26 +21,20 @@ namespace MassangerMaximka
         private FileTransferService? _files;
         private UdpVoiceTransport? _voice;
         private MetricsService? _metrics;
+        private IAudioManager? _audioManager;
+        private IAudioRecorder? _audioRecorder;
         private readonly HashSet<string> _autoConnectInFlight = [];
         private string? _localNodeId;
         private string? _selectedPeerNodeId;
         private string? _lastTransferId;
         private string? _lastReceivedVoicePath;
-#pragma warning disable CS0649, CS0169
         private bool _isRecordingVoice;
         private string? _voiceRecordPath;
-#pragma warning restore CS0649, CS0169
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
         private readonly List<string> _chatLog = [];
         private int _techLogCount;
         private volatile bool _suppressTechLog;
-
-#if WINDOWS
-        [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
-        private static extern int mciSendStringW(string command, StringBuilder? buffer, int bufSize, IntPtr hwnd);
-        private static int Mci(string cmd) => mciSendStringW(cmd, null, 0, IntPtr.Zero);
-#endif
 
         public MainPage()
         {
@@ -63,6 +55,7 @@ namespace MassangerMaximka
             _files = services.GetService<FileTransferService>();
             _voice = services.GetService<UdpVoiceTransport>();
             _metrics = services.GetService<MetricsService>();
+            _audioManager = services.GetService<IAudioManager>();
             var config = services.GetService<NodeConfiguration>();
             _localNodeId = config?.NodeId;
 
@@ -415,30 +408,20 @@ namespace MassangerMaximka
             }
         }
 
-        private void OnRecordVoiceClicked(object? sender, EventArgs e)
+        private async void OnRecordVoiceClicked(object? sender, EventArgs e)
         {
-            if (_isRecordingVoice)
+            if (_isRecordingVoice || _audioManager == null)
             {
-                AppendChat("[Error] Already recording");
+                AppendChat(_audioManager == null ? "[Error] Audio not available" : "[Error] Already recording");
                 return;
             }
-
-#if WINDOWS
             try
             {
                 var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "VoiceMessages");
                 Directory.CreateDirectory(dir);
                 _voiceRecordPath = Path.Combine(dir, $"voice_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
-
-                Mci("close capture");
-                Mci("open new type waveaudio alias capture");
-                var rc = Mci("record capture");
-                if (rc != 0)
-                {
-                    AppendChat($"[Error] Microphone unavailable (mci={rc})");
-                    TechLog(LogCat.System, $"MCI record failed: error {rc}");
-                    return;
-                }
+                _audioRecorder = _audioManager.CreateRecorder();
+                await _audioRecorder.StartAsync(_voiceRecordPath);
                 _isRecordingVoice = true;
                 RecordBtn.BackgroundColor = Color.FromArgb("#F44336");
                 VoiceStatusLabel.Text = "Voice: RECORDING...";
@@ -449,36 +432,32 @@ namespace MassangerMaximka
                 AppendChat($"[Error] Record failed: {ex.Message}");
                 TechLog(LogCat.System, $"Voice record error: {ex.Message}");
             }
-#else
-            AppendChat("[Info] Voice recording available on Windows only");
-#endif
         }
 
         private async void OnStopSendVoiceClicked(object? sender, EventArgs e)
         {
-            if (!_isRecordingVoice || _files == null)
+            if (!_isRecordingVoice || _files == null || _audioRecorder == null)
             {
                 AppendChat("[Error] Not recording or file service unavailable");
                 return;
             }
-
-#if WINDOWS
             try
             {
-                Mci("stop capture");
-                Mci($"save capture \"{_voiceRecordPath}\"");
-                Mci("close capture");
+                var source = await _audioRecorder.StopAsync();
                 _isRecordingVoice = false;
+                _audioRecorder = null;
                 RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
 
-                if (_voiceRecordPath == null || !File.Exists(_voiceRecordPath) || new FileInfo(_voiceRecordPath).Length <= 44)
+                var path = source is FileAudioSource fs ? fs.GetFilePath() : _voiceRecordPath;
+                if (string.IsNullOrEmpty(path) || !File.Exists(path) || new FileInfo(path).Length <= 44)
                 {
                     AppendChat("[Error] Recording produced no audio data");
                     VoiceStatusLabel.Text = "Voice: idle";
                     return;
                 }
+                _voiceRecordPath = path;
 
-                var fi = new FileInfo(_voiceRecordPath);
+                var fi = new FileInfo(path);
                 VoiceStatusLabel.Text = $"Voice: sending {fi.Length / 1024}KB...";
                 TechLog(LogCat.Transport, $"Voice message saved: {fi.Length} bytes");
 
@@ -490,7 +469,7 @@ namespace MassangerMaximka
                     return;
                 }
 
-                var transfer = await _files.SendFileAsync(toNodeId, _voiceRecordPath);
+                var transfer = await _files.SendFileAsync(toNodeId, path);
                 _lastTransferId = transfer.TransferId;
                 AppendChat($"[Voice] Sent voice message to {toNodeId}");
                 VoiceStatusLabel.Text = "Voice: sent";
@@ -502,10 +481,6 @@ namespace MassangerMaximka
                 TechLog(LogCat.System, $"Voice send error: {ex.Message}");
                 VoiceStatusLabel.Text = "Voice: idle";
             }
-#else
-            AppendChat("[Info] Voice available on Windows only");
-            await Task.CompletedTask;
-#endif
         }
 
         private void OnPlayVoiceClicked(object? sender, EventArgs e)
@@ -532,18 +507,15 @@ namespace MassangerMaximka
 
         private void PlayVoiceFile(string path)
         {
-#if WINDOWS
+            if (_audioManager == null)
+            {
+                _ = Launcher.OpenAsync(new OpenFileRequest("Voice", new ReadOnlyFile(path)));
+                return;
+            }
             try
             {
-                Mci("close playback");
-                var rc = Mci($"open \"{path}\" type waveaudio alias playback");
-                if (rc != 0)
-                {
-                    TechLog(LogCat.System, $"MCI open for playback failed: {rc}, falling back to shell");
-                    _ = Launcher.OpenAsync(new OpenFileRequest("Voice", new ReadOnlyFile(path)));
-                    return;
-                }
-                Mci("play playback");
+                var player = _audioManager.CreatePlayer(path);
+                player.Play();
                 VoiceStatusLabel.Text = $"Voice: playing {Path.GetFileName(path)}";
                 TechLog(LogCat.System, $"Playing voice: {path}");
             }
@@ -552,9 +524,6 @@ namespace MassangerMaximka
                 TechLog(LogCat.System, $"Voice play error: {ex.Message}");
                 _ = Launcher.OpenAsync(new OpenFileRequest("Voice", new ReadOnlyFile(path)));
             }
-#else
-            _ = Launcher.OpenAsync(new OpenFileRequest("Voice", new ReadOnlyFile(path)));
-#endif
         }
 
         private async void OnCopyLogsClicked(object? sender, EventArgs e)

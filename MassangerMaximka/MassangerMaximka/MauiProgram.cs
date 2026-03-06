@@ -1,6 +1,7 @@
 using HexTeam.Messenger.Core;
 using HexTeam.Messenger.Core.Models;
 using Microsoft.Extensions.Logging;
+using Plugin.Maui.Audio;
 
 namespace MassangerMaximka
 {
@@ -9,6 +10,7 @@ namespace MassangerMaximka
         public static MauiApp CreateMauiApp()
         {
             var builder = MauiApp.CreateBuilder();
+            builder.AddAudio();
             builder
                 .UseMauiApp<App>()
                 .ConfigureFonts(fonts =>

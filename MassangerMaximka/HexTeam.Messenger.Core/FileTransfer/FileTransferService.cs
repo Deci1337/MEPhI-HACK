@@ -207,28 +207,47 @@ public sealed class FileTransferService
             if (!Directory.Exists(_receiveDir))
                 Directory.CreateDirectory(_receiveDir);
 
-            await using (var fs = File.Create(ctx.SavePath))
+            var dir = Path.GetDirectoryName(ctx.SavePath)!;
+            var name = Path.GetFileNameWithoutExtension(ctx.FileName);
+            var ext = Path.GetExtension(ctx.FileName);
+            string? savePath = null;
+            for (var i = 0; i < 100; i++)
             {
-                foreach (var chunk in ctx.ReceivedChunks)
+                var path = i == 0 ? ctx.SavePath : Path.Combine(dir, $"{name} ({i}){ext}");
+                try
                 {
-                    if (chunk != null)
-                        await fs.WriteAsync(chunk);
+                    await using (var fs = File.Create(path))
+                    {
+                        foreach (var chunk in ctx.ReceivedChunks)
+                        {
+                            if (chunk != null)
+                                await fs.WriteAsync(chunk);
+                        }
+                    }
+                    savePath = path;
+                    break;
+                }
+                catch (IOException)
+                {
+                    continue;
                 }
             }
+            if (savePath == null)
+                throw new IOException("Could not save file: all path variants are locked");
 
-            var savedHash = await FileIntegrityService.ComputeFileHashAsync(ctx.SavePath);
+            var savedHash = await FileIntegrityService.ComputeFileHashAsync(savePath);
             var hashOk = savedHash == ctx.FileHash;
             if (!hashOk)
                 _logger.LogError("File integrity check failed for {Name} (expected={Expected}, got={Got})", ctx.FileName, ctx.FileHash, savedHash);
             else
-                _logger.LogInformation("File {Name} saved and verified at {Path}", ctx.FileName, ctx.SavePath);
+                _logger.LogInformation("File {Name} saved and verified at {Path}", ctx.FileName, savePath);
 
             if (_transfers.TryGetValue(transferId, out var transfer))
             {
                 transfer.State = hashOk ? FileTransferState.Completed : FileTransferState.Failed;
                 TransferProgressChanged?.Invoke(transfer);
             }
-            FileReceived?.Invoke(transferId, ctx.SavePath);
+            FileReceived?.Invoke(transferId, savePath);
         }
         catch (Exception ex)
         {
