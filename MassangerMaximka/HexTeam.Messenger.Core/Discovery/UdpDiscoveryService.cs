@@ -64,11 +64,9 @@ public sealed class UdpDiscoveryService : IDisposable
 
     public PeerInfo AddManualPeer(string nodeId, string displayName, IPEndPoint endPoint, bool isRelay = false)
     {
-        var peer = new PeerInfo(nodeId, displayName, endPoint, isRelay)
-        {
-            LastSeen = DateTime.UtcNow,
-            State = PeerState.Discovered
-        };
+        var peer = PeerInfo.FromDiscovery(nodeId, displayName, endPoint, isRelay);
+        peer.LastSeen = DateTimeOffset.UtcNow;
+        peer.State = PeerConnectionState.Discovered;
         _peers[nodeId] = peer;
         PeerDiscovered?.Invoke(peer);
         _logger.LogInformation("Manual peer added: {NodeId} at {EndPoint}", nodeId, endPoint);
@@ -109,10 +107,8 @@ public sealed class UdpDiscoveryService : IDisposable
 
                 var ep = new IPEndPoint(result.RemoteEndPoint.Address, beacon.TcpPort);
                 var isNew = !_peers.ContainsKey(beacon.NodeId);
-                var peer = new PeerInfo(beacon.NodeId, beacon.DisplayName, ep, beacon.IsRelay)
-                {
-                    LastSeen = DateTime.UtcNow
-                };
+                var peer = PeerInfo.FromDiscovery(beacon.NodeId, beacon.DisplayName, ep, beacon.IsRelay);
+                peer.LastSeen = DateTimeOffset.UtcNow;
                 _peers[beacon.NodeId] = peer;
 
                 if (isNew)
@@ -133,7 +129,7 @@ public sealed class UdpDiscoveryService : IDisposable
         while (!ct.IsCancellationRequested)
         {
             await Task.Delay(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
-            var cutoff = DateTime.UtcNow - PeerTimeout;
+            var cutoff = DateTimeOffset.UtcNow - PeerTimeout;
             foreach (var kvp in _peers)
             {
                 if (kvp.Value.LastSeen < cutoff)

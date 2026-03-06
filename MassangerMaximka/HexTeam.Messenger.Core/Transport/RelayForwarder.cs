@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using HexTeam.Messenger.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace HexTeam.Messenger.Core.Transport;
@@ -28,16 +27,16 @@ public sealed class RelayForwarder
         _ = PruneSeenPacketsAsync();
     }
 
-    private async Task OnEnvelopeReceived(string fromPeerNodeId, Envelope envelope)
+    private async Task OnEnvelopeReceived(string fromPeerNodeId, TransportEnvelope envelope)
     {
         if (!IsRelayEnabled) return;
         if (envelope.DestinationNodeId == _nodeId) return;
-        if (envelope.Type == PacketType.Hello || envelope.Type == PacketType.Discovery) return;
+        if (envelope.Type == TransportPacketType.Hello || envelope.Type == TransportPacketType.Discovery) return;
 
         await ForwardAsync(fromPeerNodeId, envelope);
     }
 
-    public async Task ForwardAsync(string fromPeerNodeId, Envelope envelope)
+    public async Task ForwardAsync(string fromPeerNodeId, TransportEnvelope envelope)
     {
         if (_seenPackets.ContainsKey(envelope.PacketId))
         {

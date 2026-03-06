@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace HexTeam.Messenger.Core.Models;
+namespace HexTeam.Messenger.Core.Transport;
 
 public static class EnvelopeSerializer
 {
@@ -9,7 +9,7 @@ public static class EnvelopeSerializer
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public static byte[] Serialize(Envelope envelope)
+    public static byte[] Serialize(TransportEnvelope envelope)
     {
         var json = JsonSerializer.SerializeToUtf8Bytes(envelope, Options);
         var length = BitConverter.GetBytes(json.Length);
@@ -19,12 +19,12 @@ public static class EnvelopeSerializer
         return result;
     }
 
-    public static Envelope? Deserialize(byte[] data)
+    public static TransportEnvelope? Deserialize(byte[] data)
     {
-        return JsonSerializer.Deserialize<Envelope>(data, Options);
+        return JsonSerializer.Deserialize<TransportEnvelope>(data, Options);
     }
 
-    public static async Task<Envelope?> ReadFromStreamAsync(Stream stream, CancellationToken ct = default)
+    public static async Task<TransportEnvelope?> ReadFromStreamAsync(Stream stream, CancellationToken ct = default)
     {
         var lengthBuf = new byte[4];
         var read = await ReadExactAsync(stream, lengthBuf, 0, 4, ct);
@@ -37,10 +37,10 @@ public static class EnvelopeSerializer
         read = await ReadExactAsync(stream, jsonBuf, 0, length, ct);
         if (read < length) return null;
 
-        return JsonSerializer.Deserialize<Envelope>(jsonBuf, Options);
+        return JsonSerializer.Deserialize<TransportEnvelope>(jsonBuf, Options);
     }
 
-    public static async Task WriteToStreamAsync(Stream stream, Envelope envelope, CancellationToken ct = default)
+    public static async Task WriteToStreamAsync(Stream stream, TransportEnvelope envelope, CancellationToken ct = default)
     {
         var data = Serialize(envelope);
         await stream.WriteAsync(data, ct);

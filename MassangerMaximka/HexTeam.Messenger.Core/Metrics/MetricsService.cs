@@ -94,14 +94,14 @@ public sealed class MetricsService
             {
                 try
                 {
-                    var pingId = Envelope.NewPacketId();
+                    var pingId = TransportEnvelope.NewPacketId();
                     var sw = Stopwatch.StartNew();
                     _pendingPings[pingId] = sw;
 
-                    var ping = new Envelope
+                    var ping = new TransportEnvelope
                     {
                         PacketId = pingId,
-                        Type = PacketType.Ack,
+                        Type = TransportPacketType.Ack,
                         SourceNodeId = _nodeId,
                         DestinationNodeId = conn.Key,
                         Payload = Encoding.UTF8.GetBytes("ping")
@@ -114,9 +114,9 @@ public sealed class MetricsService
         }
     }
 
-    private Task OnEnvelopeReceived(string fromPeerNodeId, Envelope envelope)
+    private Task OnEnvelopeReceived(string fromPeerNodeId, TransportEnvelope envelope)
     {
-        if (envelope.Type == PacketType.Ack &&
+        if (envelope.Type == TransportPacketType.Ack &&
             envelope.Payload.Length > 0 &&
             Encoding.UTF8.GetString(envelope.Payload) == "pong")
         {
@@ -130,14 +130,14 @@ public sealed class MetricsService
             }
         }
 
-        if (envelope.Type == PacketType.Ack &&
+        if (envelope.Type == TransportPacketType.Ack &&
             envelope.Payload.Length > 0 &&
             Encoding.UTF8.GetString(envelope.Payload) == "ping")
         {
-            var pong = new Envelope
+            var pong = new TransportEnvelope
             {
                 PacketId = envelope.PacketId,
-                Type = PacketType.Ack,
+                Type = TransportPacketType.Ack,
                 SourceNodeId = _nodeId,
                 DestinationNodeId = fromPeerNodeId,
                 Payload = Encoding.UTF8.GetBytes("pong")

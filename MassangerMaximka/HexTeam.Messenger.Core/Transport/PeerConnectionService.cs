@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-using HexTeam.Messenger.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace HexTeam.Messenger.Core.Transport;
@@ -16,7 +15,7 @@ public sealed class PeerConnectionService : IDisposable
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
 
-    public event Func<string, Envelope, Task>? EnvelopeReceived;
+    public event Func<string, TransportEnvelope, Task>? EnvelopeReceived;
     public event Action<string>? PeerConnected;
     public event Action<string>? PeerDisconnected;
 
@@ -49,10 +48,10 @@ public sealed class PeerConnectionService : IDisposable
             var conn = new PeerConnection(peerNodeId, client);
             _connections[peerNodeId] = conn;
 
-            var hello = new Envelope
+            var hello = new TransportEnvelope
             {
-                PacketId = Envelope.NewPacketId(),
-                Type = PacketType.Hello,
+                PacketId = TransportEnvelope.NewPacketId(),
+                Type = TransportPacketType.Hello,
                 SourceNodeId = _nodeId,
                 DestinationNodeId = peerNodeId,
                 Payload = System.Text.Encoding.UTF8.GetBytes(_nodeId)
@@ -71,14 +70,14 @@ public sealed class PeerConnectionService : IDisposable
         }
     }
 
-    public async Task SendAsync(string peerNodeId, Envelope envelope, CancellationToken ct = default)
+    public async Task SendAsync(string peerNodeId, TransportEnvelope envelope, CancellationToken ct = default)
     {
         if (!_connections.TryGetValue(peerNodeId, out var conn))
             throw new InvalidOperationException($"No connection to peer {peerNodeId}");
         await EnvelopeSerializer.WriteToStreamAsync(conn.Stream, envelope, ct);
     }
 
-    public async Task BroadcastAsync(Envelope envelope, CancellationToken ct = default)
+    public async Task BroadcastAsync(TransportEnvelope envelope, CancellationToken ct = default)
     {
         var tasks = _connections.Values.Select(c =>
             EnvelopeSerializer.WriteToStreamAsync(c.Stream, envelope, ct));
@@ -120,7 +119,7 @@ public sealed class PeerConnectionService : IDisposable
         {
             var stream = client.GetStream();
             var hello = await EnvelopeSerializer.ReadFromStreamAsync(stream, ct);
-            if (hello == null || hello.Type != PacketType.Hello)
+            if (hello == null || hello.Type != TransportPacketType.Hello)
             {
                 client.Close();
                 return;

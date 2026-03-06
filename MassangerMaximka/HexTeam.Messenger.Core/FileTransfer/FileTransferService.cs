@@ -15,14 +15,14 @@ public sealed class FileTransferService
     private readonly string _nodeId;
     private readonly PeerConnectionService _connectionService;
     private readonly ILogger<FileTransferService> _logger;
-    private readonly ConcurrentDictionary<string, FileTransferInfo> _transfers = new();
+    private readonly ConcurrentDictionary<string, TransportFileTransferInfo> _transfers = new();
     private readonly ConcurrentDictionary<string, FileReceiveContext> _receiving = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _chunkAcks = new();
 
-    public event Action<FileTransferInfo>? TransferProgressChanged;
+    public event Action<TransportFileTransferInfo>? TransferProgressChanged;
     public event Action<string, string>? FileReceived; // transferId, savedPath
 
-    public IReadOnlyDictionary<string, FileTransferInfo> ActiveTransfers => _transfers;
+    public IReadOnlyDictionary<string, TransportFileTransferInfo> ActiveTransfers => _transfers;
 
     public FileTransferService(string nodeId, PeerConnectionService connectionService, ILogger<FileTransferService> logger)
     {
@@ -32,15 +32,15 @@ public sealed class FileTransferService
         _connectionService.EnvelopeReceived += OnEnvelopeReceived;
     }
 
-    public async Task<FileTransferInfo> SendFileAsync(string toPeerNodeId, string filePath, CancellationToken ct = default)
+    public async Task<TransportFileTransferInfo> SendFileAsync(string toPeerNodeId, string filePath, CancellationToken ct = default)
     {
         var fileInfo = new System.IO.FileInfo(filePath);
         var fileHash = await FileIntegrityService.ComputeFileHashAsync(filePath, ct);
         var totalChunks = (int)Math.Ceiling((double)fileInfo.Length / DefaultChunkSize);
 
-        var transfer = new FileTransferInfo
+        var transfer = new TransportFileTransferInfo
         {
-            TransferId = Envelope.NewPacketId(),
+            TransferId = TransportEnvelope.NewPacketId(),
             FileName = fileInfo.Name,
             FileSize = fileInfo.Length,
             FileHash = fileHash,
@@ -50,7 +50,7 @@ public sealed class FileTransferService
         _transfers[transfer.TransferId] = transfer;
 
         var header = new FileHeaderPacket(transfer.TransferId, transfer.FileName, transfer.FileSize, fileHash, DefaultChunkSize, totalChunks);
-        await SendEnvelopeAsync(toPeerNodeId, PacketType.FileHeader, header, ct);
+        await SendEnvelopeAsync(toPeerNodeId, TransportPacketType.FileHeader, header, ct);
 
         using var stream = File.OpenRead(filePath);
         var buffer = new byte[DefaultChunkSize];
@@ -72,7 +72,7 @@ public sealed class FileTransferService
             var tcs = new TaskCompletionSource<bool>();
             _chunkAcks[ackKey] = tcs;
 
-            await SendEnvelopeAsync(toPeerNodeId, PacketType.FileChunk, chunk, ct);
+            await SendEnvelopeAsync(toPeerNodeId, TransportPacketType.FileChunk, chunk, ct);
 
             var acked = await WaitForAckAsync(tcs, ct);
             _chunkAcks.TryRemove(ackKey, out _);
@@ -90,7 +90,7 @@ public sealed class FileTransferService
         }
 
         transfer.State = FileTransferState.Completed;
-        await SendEnvelopeAsync(toPeerNodeId, PacketType.FileComplete,
+        await SendEnvelopeAsync(toPeerNodeId, TransportPacketType.FileComplete,
             new { transfer.TransferId }, ct);
 
         TransferProgressChanged?.Invoke(transfer);
@@ -107,26 +107,26 @@ public sealed class FileTransferService
 
     private string _receiveDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "HexTeamReceived");
 
-    private async Task OnEnvelopeReceived(string fromPeerNodeId, Envelope envelope)
+    private async Task OnEnvelopeReceived(string fromPeerNodeId, TransportEnvelope envelope)
     {
         switch (envelope.Type)
         {
-            case PacketType.FileHeader:
+            case TransportPacketType.FileHeader:
                 HandleFileHeader(fromPeerNodeId, envelope);
                 break;
-            case PacketType.FileChunk:
+            case TransportPacketType.FileChunk:
                 await HandleFileChunk(fromPeerNodeId, envelope);
                 break;
-            case PacketType.FileChunkAck:
+            case TransportPacketType.FileChunkAck:
                 HandleFileChunkAck(envelope);
                 break;
-            case PacketType.FileComplete:
+            case TransportPacketType.FileComplete:
                 await HandleFileComplete(envelope);
                 break;
         }
     }
 
-    private void HandleFileHeader(string fromPeerNodeId, Envelope envelope)
+    private void HandleFileHeader(string fromPeerNodeId, TransportEnvelope envelope)
     {
         var header = JsonSerializer.Deserialize<FileHeaderPacket>(envelope.Payload);
         if (header == null) return;
@@ -148,7 +148,7 @@ public sealed class FileTransferService
         };
         _receiving[header.TransferId] = ctx;
 
-        var transfer = new FileTransferInfo
+        var transfer = new TransportFileTransferInfo
         {
             TransferId = header.TransferId,
             FileName = header.FileName,
@@ -163,7 +163,7 @@ public sealed class FileTransferService
         _logger.LogInformation("Receiving file {Name} ({Size} bytes) from {From}", header.FileName, header.FileSize, fromPeerNodeId);
     }
 
-    private async Task HandleFileChunk(string fromPeerNodeId, Envelope envelope)
+    private async Task HandleFileChunk(string fromPeerNodeId, TransportEnvelope envelope)
     {
         var chunk = JsonSerializer.Deserialize<FileChunkPacket>(envelope.Payload);
         if (chunk == null) return;
@@ -172,7 +172,7 @@ public sealed class FileTransferService
 
         var valid = FileIntegrityService.VerifyChunkHash(chunk.Data, chunk.ChunkHash);
         var ack = new FileChunkAckPacket(chunk.TransferId, chunk.ChunkIndex, valid);
-        await SendEnvelopeAsync(fromPeerNodeId, PacketType.FileChunkAck, ack);
+        await SendEnvelopeAsync(fromPeerNodeId, TransportPacketType.FileChunkAck, ack);
 
         if (valid)
         {
@@ -191,7 +191,7 @@ public sealed class FileTransferService
         }
     }
 
-    private void HandleFileChunkAck(Envelope envelope)
+    private void HandleFileChunkAck(TransportEnvelope envelope)
     {
         var ack = JsonSerializer.Deserialize<FileChunkAckPacket>(envelope.Payload);
         if (ack == null) return;
@@ -201,7 +201,7 @@ public sealed class FileTransferService
             tcs.TrySetResult(ack.Success);
     }
 
-    private async Task HandleFileComplete(Envelope envelope)
+    private async Task HandleFileComplete(TransportEnvelope envelope)
     {
         var data = JsonSerializer.Deserialize<JsonElement>(envelope.Payload);
         var transferId = data.GetProperty("transferId").GetString();
@@ -243,11 +243,11 @@ public sealed class FileTransferService
         }
     }
 
-    private async Task SendEnvelopeAsync<T>(string toPeerNodeId, PacketType type, T payload, CancellationToken ct = default)
+    private async Task SendEnvelopeAsync<T>(string toPeerNodeId, TransportPacketType type, T payload, CancellationToken ct = default)
     {
-        var envelope = new Envelope
+        var envelope = new TransportEnvelope
         {
-            PacketId = Envelope.NewPacketId(),
+            PacketId = TransportEnvelope.NewPacketId(),
             Type = type,
             SourceNodeId = _nodeId,
             DestinationNodeId = toPeerNodeId,

@@ -1,9 +1,9 @@
-namespace HexTeam.Messenger.Core.Models;
+namespace HexTeam.Messenger.Core.Transport;
 
-public sealed record Envelope
+public sealed record TransportEnvelope
 {
     public required string PacketId { get; init; }
-    public required PacketType Type { get; init; }
+    public required TransportPacketType Type { get; init; }
     public required string SourceNodeId { get; init; }
     public required string DestinationNodeId { get; init; }
     public int HopCount { get; init; }
@@ -12,4 +12,21 @@ public sealed record Envelope
     public byte[] Payload { get; init; } = [];
 
     public static string NewPacketId() => Guid.NewGuid().ToString("N")[..16];
+}
+
+public enum TransportPacketType : byte
+{
+    Hello = 1,
+    Chat = 2,
+    Ack = 3,
+    FileHeader = 10,
+    FileChunk = 11,
+    FileChunkAck = 12,
+    FileComplete = 13,
+    VoiceFrame = 20,
+    Relay = 30,
+    Discovery = 40,
+    Disconnect = 50,
+    Inventory = 60,
+    MissingRequest = 61
 }

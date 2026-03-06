@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
-using HexTeam.Messenger.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace HexTeam.Messenger.Core.Transport;
@@ -11,9 +10,9 @@ public sealed class TcpChatTransport
     private readonly string _nodeId;
     private readonly PeerConnectionService _connectionService;
     private readonly ILogger<TcpChatTransport> _logger;
-    private readonly ConcurrentDictionary<string, ChatMessage> _pendingAcks = new();
+    private readonly ConcurrentDictionary<string, TransportChatMessage> _pendingAcks = new();
 
-    public event Action<ChatMessage>? MessageReceived;
+    public event Action<TransportChatMessage>? MessageReceived;
     public event Action<string, DeliveryStatus>? DeliveryStatusChanged;
 
     public TcpChatTransport(string nodeId, PeerConnectionService connectionService, ILogger<TcpChatTransport> logger)
@@ -24,19 +23,19 @@ public sealed class TcpChatTransport
         _connectionService.EnvelopeReceived += OnEnvelopeReceived;
     }
 
-    public async Task<ChatMessage> SendMessageAsync(string toNodeId, string text, CancellationToken ct = default)
+    public async Task<TransportChatMessage> SendMessageAsync(string toNodeId, string text, CancellationToken ct = default)
     {
-        var msg = new ChatMessage(
-            Envelope.NewPacketId(),
+        var msg = new TransportChatMessage(
+            TransportEnvelope.NewPacketId(),
             _nodeId,
             toNodeId,
             text,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
-        var envelope = new Envelope
+        var envelope = new TransportEnvelope
         {
             PacketId = msg.MessageId,
-            Type = PacketType.Chat,
+            Type = TransportPacketType.Chat,
             SourceNodeId = _nodeId,
             DestinationNodeId = toNodeId,
             Payload = JsonSerializer.SerializeToUtf8Bytes(msg)
@@ -67,25 +66,25 @@ public sealed class TcpChatTransport
         return msg;
     }
 
-    private Task OnEnvelopeReceived(string fromPeerNodeId, Envelope envelope)
+    private Task OnEnvelopeReceived(string fromPeerNodeId, TransportEnvelope envelope)
     {
         switch (envelope.Type)
         {
-            case PacketType.Chat:
+            case TransportPacketType.Chat:
                 HandleChatPacket(fromPeerNodeId, envelope);
                 break;
-            case PacketType.Ack:
+            case TransportPacketType.Ack:
                 HandleAck(envelope);
                 break;
         }
         return Task.CompletedTask;
     }
 
-    private void HandleChatPacket(string fromPeerNodeId, Envelope envelope)
+    private void HandleChatPacket(string fromPeerNodeId, TransportEnvelope envelope)
     {
         try
         {
-            var msg = JsonSerializer.Deserialize<ChatMessage>(envelope.Payload);
+            var msg = JsonSerializer.Deserialize<TransportChatMessage>(envelope.Payload);
             if (msg == null) return;
 
             if (msg.ToNodeId == _nodeId)
@@ -105,7 +104,7 @@ public sealed class TcpChatTransport
         }
     }
 
-    private void HandleAck(Envelope envelope)
+    private void HandleAck(TransportEnvelope envelope)
     {
         var ackedId = Encoding.UTF8.GetString(envelope.Payload);
         if (_pendingAcks.TryRemove(ackedId, out var msg))
@@ -118,10 +117,10 @@ public sealed class TcpChatTransport
 
     private async Task SendAckAsync(string toPeerNodeId, string ackedPacketId)
     {
-        var ack = new Envelope
+        var ack = new TransportEnvelope
         {
-            PacketId = Envelope.NewPacketId(),
-            Type = PacketType.Ack,
+            PacketId = TransportEnvelope.NewPacketId(),
+            Type = TransportPacketType.Ack,
             SourceNodeId = _nodeId,
             DestinationNodeId = toPeerNodeId,
             Payload = Encoding.UTF8.GetBytes(ackedPacketId)
