@@ -23,6 +23,8 @@ namespace MassangerMaximka
         private MetricsService? _metrics;
         private IAudioManager? _audioManager;
         private IAudioRecorder? _audioRecorder;
+        private IAudioPlayer? _voicePlayer;
+        private MemoryStream? _voicePlaybackStream;
         private readonly HashSet<string> _autoConnectInFlight = [];
         private string? _localNodeId;
         private string? _selectedPeerNodeId;
@@ -102,6 +104,7 @@ namespace MassangerMaximka
             if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
             if (_files != null) { _files.TransferProgressChanged -= OnTransferProgressChanged; _files.FileReceived -= OnFileReceived; }
             if (_metrics != null) _metrics.MetricsUpdated -= OnMetricsUpdated;
+            DisposeVoicePlayback();
             base.OnDisappearing();
         }
 
@@ -420,12 +423,26 @@ namespace MassangerMaximka
                 var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "VoiceMessages");
                 Directory.CreateDirectory(dir);
                 _voiceRecordPath = Path.Combine(dir, $"voice_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
+                if (!await EnsureMicrophonePermissionAsync())
+                {
+                    AppendChat("[Error] Microphone permission denied");
+                    VoiceStatusLabel.Text = "Voice: mic permission denied";
+                    return;
+                }
+
                 _audioRecorder = _audioManager.CreateRecorder();
-                await _audioRecorder.StartAsync(_voiceRecordPath);
+                if (!_audioRecorder.CanRecordAudio)
+                {
+                    AppendChat("[Error] Device cannot record audio");
+                    VoiceStatusLabel.Text = "Voice: recorder unavailable";
+                    return;
+                }
+
+                await _audioRecorder.StartAsync(CreateVoiceRecorderOptions());
                 _isRecordingVoice = true;
                 RecordBtn.BackgroundColor = Color.FromArgb("#F44336");
                 VoiceStatusLabel.Text = "Voice: RECORDING...";
-                TechLog(LogCat.System, $"Voice recording started -> {_voiceRecordPath}");
+                TechLog(LogCat.System, $"Voice recording started -> temp file, final path {_voiceRecordPath}");
             }
             catch (Exception ex)
             {
@@ -448,11 +465,12 @@ namespace MassangerMaximka
                 _audioRecorder = null;
                 RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
 
-                var path = source is FileAudioSource fs ? fs.GetFilePath() : _voiceRecordPath;
+                var path = await PersistVoiceRecordingAsync(source);
                 if (string.IsNullOrEmpty(path) || !File.Exists(path) || new FileInfo(path).Length <= 44)
                 {
                     AppendChat("[Error] Recording produced no audio data");
                     VoiceStatusLabel.Text = "Voice: idle";
+                    TechLog(LogCat.System, "Voice recording stop returned empty or invalid file");
                     return;
                 }
                 _voiceRecordPath = path;
@@ -477,6 +495,9 @@ namespace MassangerMaximka
             }
             catch (Exception ex)
             {
+                _isRecordingVoice = false;
+                _audioRecorder = null;
+                RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
                 AppendChat($"[Error] Voice send failed: {ex.Message}");
                 TechLog(LogCat.System, $"Voice send error: {ex.Message}");
                 VoiceStatusLabel.Text = "Voice: idle";
@@ -514,8 +535,11 @@ namespace MassangerMaximka
             }
             try
             {
-                var player = _audioManager.CreatePlayer(path);
-                player.Play();
+                DisposeVoicePlayback();
+                _voicePlaybackStream = new MemoryStream(File.ReadAllBytes(path));
+                _voicePlayer = _audioManager.CreatePlayer(_voicePlaybackStream);
+                _voicePlayer.PlaybackEnded += OnVoicePlaybackEnded;
+                _voicePlayer.Play();
                 VoiceStatusLabel.Text = $"Voice: playing {Path.GetFileName(path)}";
                 TechLog(LogCat.System, $"Playing voice: {path}");
             }
@@ -620,6 +644,85 @@ namespace MassangerMaximka
             var parts = input.Split(':');
             if (parts.Length != 2) return false;
             return IPAddress.TryParse(parts[0], out ip!) && int.TryParse(parts[1], out port);
+        }
+
+        private async Task<bool> EnsureMicrophonePermissionAsync()
+        {
+            var status = await Permissions.CheckStatusAsync<Permissions.Microphone>();
+            if (status == PermissionStatus.Granted)
+                return true;
+
+            status = await Permissions.RequestAsync<Permissions.Microphone>();
+            return status == PermissionStatus.Granted;
+        }
+
+        private static AudioRecorderOptions CreateVoiceRecorderOptions() => new()
+        {
+            SampleRate = 44100,
+            Channels = ChannelType.Mono,
+            BitDepth = BitDepth.Pcm16bit,
+            Encoding = Plugin.Maui.Audio.Encoding.Wav,
+            ThrowIfNotSupported = true
+        };
+
+        private async Task<string?> PersistVoiceRecordingAsync(IAudioSource source)
+        {
+            var preferredPath = _voiceRecordPath;
+            if (!string.IsNullOrWhiteSpace(preferredPath))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(preferredPath)!);
+                if (File.Exists(preferredPath) && new FileInfo(preferredPath).Length > 44)
+                    return preferredPath;
+            }
+
+            if (source is FileAudioSource fileSource)
+            {
+                var sourcePath = fileSource.GetFilePath();
+                if (!string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath))
+                {
+                    if (string.IsNullOrWhiteSpace(preferredPath))
+                        return sourcePath;
+
+                    await using var input = File.OpenRead(sourcePath);
+                    await using var output = File.Create(preferredPath);
+                    await input.CopyToAsync(output);
+                    return preferredPath;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(preferredPath))
+                return null;
+
+            await using var audioStream = source.GetAudioStream();
+            if (audioStream == null)
+                return null;
+
+            await using var fileStream = File.Create(preferredPath);
+            await audioStream.CopyToAsync(fileStream);
+            return preferredPath;
+        }
+
+        private void OnVoicePlaybackEnded(object? sender, EventArgs e)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                if (VoiceStatusLabel.Text.StartsWith("Voice: playing", StringComparison.Ordinal))
+                    VoiceStatusLabel.Text = "Voice: idle";
+            });
+            DisposeVoicePlayback();
+        }
+
+        private void DisposeVoicePlayback()
+        {
+            if (_voicePlayer != null)
+            {
+                _voicePlayer.PlaybackEnded -= OnVoicePlaybackEnded;
+                _voicePlayer.Dispose();
+                _voicePlayer = null;
+            }
+
+            _voicePlaybackStream?.Dispose();
+            _voicePlaybackStream = null;
         }
 
         private static string? ExtractNodeId(string display)
