@@ -23,6 +23,7 @@ public enum FileTransferState
 {
     Pending,
     InProgress,
+    Transferring = InProgress,
     Paused,
     Completed,
     Failed,

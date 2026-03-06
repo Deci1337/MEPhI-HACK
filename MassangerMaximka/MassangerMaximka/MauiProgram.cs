@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Logging;
+using HexTeam.Messenger.Core;
+using HexTeam.Messenger.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace MassangerMaximka
 {
@@ -16,10 +18,19 @@ namespace MassangerMaximka
                 });
 
 #if DEBUG
-    		builder.Logging.AddDebug();
+            builder.Logging.AddDebug();
 #endif
 
-            return builder.Build();
+            builder.Services.AddHexMessengerCore(new NodeConfiguration
+            {
+                DisplayName = DeviceInfo.Name,
+                TcpPort = 45680,
+                IsRelay = false
+            });
+
+            return AppInstance = builder.Build();
         }
+
+        public static MauiApp? AppInstance { get; private set; }
     }
 }
