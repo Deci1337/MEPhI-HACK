@@ -77,7 +77,7 @@ public sealed class FileTransferService
         _receiveDir = directory;
     }
 
-    private string _receiveDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "HexTeamReceived");
+    private string _receiveDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HexTeamReceived");
 
     private async Task OnEnvelopeReceived(string fromPeerNodeId, TransportEnvelope envelope)
     {
@@ -204,6 +204,9 @@ public sealed class FileTransferService
 
         try
         {
+            if (!Directory.Exists(_receiveDir))
+                Directory.CreateDirectory(_receiveDir);
+
             using var fs = File.Create(ctx.SavePath);
             foreach (var chunk in ctx.ReceivedChunks)
             {
@@ -212,29 +215,28 @@ public sealed class FileTransferService
             }
 
             var savedHash = await FileIntegrityService.ComputeFileHashAsync(ctx.SavePath);
-            if (savedHash == ctx.FileHash)
-            {
-                _logger.LogInformation("File {Name} saved and verified at {Path}", ctx.FileName, ctx.SavePath);
-                if (_transfers.TryGetValue(transferId, out var transfer))
-                {
-                    transfer.State = FileTransferState.Completed;
-                    TransferProgressChanged?.Invoke(transfer);
-                }
-                FileReceived?.Invoke(transferId, ctx.SavePath);
-            }
+            var hashOk = savedHash == ctx.FileHash;
+            if (!hashOk)
+                _logger.LogError("File integrity check failed for {Name} (expected={Expected}, got={Got})", ctx.FileName, ctx.FileHash, savedHash);
             else
+                _logger.LogInformation("File {Name} saved and verified at {Path}", ctx.FileName, ctx.SavePath);
+
+            if (_transfers.TryGetValue(transferId, out var transfer))
             {
-                _logger.LogError("File integrity check failed for {Name}", ctx.FileName);
-                if (_transfers.TryGetValue(transferId, out var transfer))
-                {
-                    transfer.State = FileTransferState.Failed;
-                    TransferProgressChanged?.Invoke(transfer);
-                }
+                transfer.State = hashOk ? FileTransferState.Completed : FileTransferState.Failed;
+                TransferProgressChanged?.Invoke(transfer);
             }
+            FileReceived?.Invoke(transferId, ctx.SavePath);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to save file {Name}", ctx.FileName);
+            _logger.LogError(ex, "Failed to save file {Name} to {Path} (receiveDir={Dir})", ctx.FileName, ctx.SavePath, _receiveDir);
+            if (_transfers.TryGetValue(transferId, out var transfer))
+            {
+                transfer.State = FileTransferState.Failed;
+                TransferProgressChanged?.Invoke(transfer);
+            }
+            FileReceived?.Invoke(transferId, $"ERROR: {ex.Message}");
         }
     }
 

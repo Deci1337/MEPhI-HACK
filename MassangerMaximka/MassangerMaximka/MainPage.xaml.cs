@@ -186,6 +186,14 @@ namespace MassangerMaximka
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
+                if (savedPath.StartsWith("ERROR:", StringComparison.Ordinal))
+                {
+                    AppendChat($"[File Error] {savedPath}");
+                    FileTransferLabel.Text = $"File: save failed";
+                    TechLog(LogCat.System, $"FILE SAVE FAILED id={transferId} {savedPath}");
+                    return;
+                }
+
                 var fileName = Path.GetFileName(savedPath);
                 FileTransferLabel.Text = $"File received: {fileName}";
                 TechLog(LogCat.Protocol, $"FILE RECV complete id={transferId} path={savedPath}");
@@ -194,12 +202,13 @@ namespace MassangerMaximka
                     fileName.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
                 {
                     _lastReceivedVoicePath = savedPath;
-                    AppendChat($"[Voice Message] {fileName} -- auto-playing...");
+                    AppendChat($"[Voice Message] {fileName} -- press Play");
                     PlayVoiceFile(savedPath);
                 }
                 else
                 {
-                    AppendChat($"[File Received] {fileName} -> {savedPath}");
+                    AppendChat($"[File Received] {fileName}");
+                    AppendChat($"  Saved: {savedPath}");
                 }
             });
         }
@@ -501,8 +510,10 @@ namespace MassangerMaximka
         {
             var path = _lastReceivedVoicePath;
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                path = _voiceRecordPath;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
             {
-                AppendChat("[Error] No voice message to play");
+                AppendChat("[Error] No voice message to play (record or receive one first)");
                 return;
             }
             PlayVoiceFile(path);

@@ -9,5 +9,5 @@ public sealed record NodeConfiguration
     public int VoicePort { get; init; } = 45679;
     public bool IsRelay { get; init; } = false;
     public string ReceiveDirectory { get; init; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "HexTeamReceived");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HexTeamReceived");
 }
