@@ -7,12 +7,11 @@ namespace HexTeam.Messenger.Core.Voice;
 
 public sealed class UdpVoiceTransport : IDisposable
 {
-    private const int VoicePort = 45679;
-    private const int FrameSize = 960;
-    private const int JitterBufferSize = 5;
+    private const int DefaultVoicePort = 45679;
+    private const int JitterBufferSize = 2;
 
-    private readonly int _localPort;
     private readonly ILogger<UdpVoiceTransport> _logger;
+    private readonly int _listenPort;
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
     private IPEndPoint? _remoteEndPoint;
@@ -21,32 +20,29 @@ public sealed class UdpVoiceTransport : IDisposable
     private int _sequenceNumber;
 
     public bool IsActive { get; private set; }
-    public int LocalPort => _localPort;
+    public int ListenPort => _listenPort;
     public VoiceMetrics Metrics { get; } = new();
 
     public event Action<byte[]>? FrameReceived;
 
-    public UdpVoiceTransport(int localPort, ILogger<UdpVoiceTransport> logger)
+    public UdpVoiceTransport(ILogger<UdpVoiceTransport> logger, int listenPort = DefaultVoicePort)
     {
-        _localPort = localPort;
         _logger = logger;
-    }
-
-    public void StartListening()
-    {
-        if (IsActive) return;
-        _cts = new CancellationTokenSource();
-        _udpClient = new UdpClient(_localPort);
-        IsActive = true;
-        _ = ReceiveLoopAsync(_cts.Token);
-        _logger.LogInformation("Voice transport listening on port {Port}", _localPort);
+        _listenPort = listenPort;
     }
 
     public void Start(IPEndPoint remoteEndPoint)
     {
+        if (IsActive) Stop();
+
         _remoteEndPoint = remoteEndPoint;
-        StartListening();
-        _logger.LogInformation("Voice transport started on port {Port}, remote={EP}", _localPort, remoteEndPoint);
+        _cts = new CancellationTokenSource();
+        _sequenceNumber = 0;
+
+        _udpClient = BindUdpClient(_listenPort);
+        IsActive = true;
+        _ = ReceiveLoopAsync(_cts.Token);
+        _logger.LogInformation("Voice transport started on :{Port}, remote={EP}", _udpClient.Client.LocalEndPoint, remoteEndPoint);
     }
 
     public async Task SendFrameAsync(byte[] pcmData)
@@ -91,7 +87,7 @@ public sealed class UdpVoiceTransport : IDisposable
                 while (_jitterBuffer.Count > JitterBufferSize)
                     _jitterBuffer.TryDequeue(out _);
 
-                if (_jitterBuffer.Count >= 2 && _jitterBuffer.TryDequeue(out var playFrame))
+                if (_jitterBuffer.TryDequeue(out var playFrame))
                     FrameReceived?.Invoke(playFrame.Data);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -106,19 +102,32 @@ public sealed class UdpVoiceTransport : IDisposable
     {
         IsActive = false;
         _cts?.Cancel();
-        _udpClient?.Close();
-        _udpClient?.Dispose();
+        try { _udpClient?.Close(); } catch { }
+        try { _udpClient?.Dispose(); } catch { }
         _udpClient = null;
+        while (_jitterBuffer.TryDequeue(out _)) { }
         _logger.LogInformation("Voice transport stopped");
+    }
+
+    private static UdpClient BindUdpClient(int preferredPort)
+    {
+        for (var offset = 0; offset < 10; offset++)
+        {
+            try
+            {
+                var client = new UdpClient(preferredPort + offset);
+                return client;
+            }
+            catch (SocketException) { }
+        }
+        return new UdpClient(0);
     }
 
     private static byte[] SerializeFrame(VoiceFrame frame)
     {
-        var seqBytes = BitConverter.GetBytes(frame.Sequence);
-        var tsBytes = BitConverter.GetBytes(frame.TimestampMs);
         var result = new byte[4 + 8 + frame.Data.Length];
-        Buffer.BlockCopy(seqBytes, 0, result, 0, 4);
-        Buffer.BlockCopy(tsBytes, 0, result, 4, 8);
+        BitConverter.TryWriteBytes(result.AsSpan(0, 4), frame.Sequence);
+        BitConverter.TryWriteBytes(result.AsSpan(4, 8), frame.TimestampMs);
         Buffer.BlockCopy(frame.Data, 0, result, 12, frame.Data.Length);
         return result;
     }

@@ -36,9 +36,11 @@ namespace MassangerMaximka
         private bool _isCallingOut;
         private string? _callPeerNodeId;
         private IPAddress? _callPeerIp;
+        private int _callPeerVoicePort;
         private string? _incomingCallFromNodeId;
         private IPAddress? _incomingCallerIp;
-        private CancellationTokenSource? _callCts;
+        private int _incomingCallerVoicePort;
+        private VoiceCallManager? _voiceCallManager;
 
         private const string CallRequestPrefix = "\x1FCALL_REQUEST:";
         private const string CallAccept = "\x1FCALL_ACCEPT";
@@ -117,6 +119,8 @@ namespace MassangerMaximka
                 if (_isInCall) EndCall();
                 else ResetCallingState();
             }
+            _voiceCallManager?.Dispose();
+            _voiceCallManager = null;
             if (_discovery != null) { _discovery.PeerDiscovered -= OnPeerDiscovered; _discovery.PeerLost -= OnPeerLost; }
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
             if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
@@ -180,18 +184,22 @@ namespace MassangerMaximka
 
                 if (text.StartsWith(CallRequestPrefix, StringComparison.Ordinal))
                 {
-                    var ipStr = text[CallRequestPrefix.Length..];
+                    var payload = text[CallRequestPrefix.Length..];
+                    var colonIdx = payload.LastIndexOf(':');
+                    var ipStr = colonIdx > 0 ? payload[..colonIdx] : payload;
+                    var voicePort = colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out var vp) ? vp : 45679;
                     if (!_isInCall && !_isCallingOut && IPAddress.TryParse(ipStr, out var callerIp))
                     {
                         _incomingCallFromNodeId = msg.FromNodeId;
                         _incomingCallerIp = callerIp;
+                        _incomingCallerVoicePort = voicePort;
                         ShowIncomingCallBanner(msg.FromNodeId);
                     }
                     else
                     {
                         _ = SendCallSignalAsync(msg.FromNodeId, CallReject);
                     }
-                    TechLog(LogCat.Protocol, $"CALL_REQUEST from {msg.FromNodeId}");
+                    TechLog(LogCat.Protocol, $"CALL_REQUEST from {msg.FromNodeId} voice_port={voicePort}");
                     return;
                 }
 
@@ -201,7 +209,7 @@ namespace MassangerMaximka
                     {
                         _isCallingOut = false;
                         TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId}");
-                        _ = StartCallAsync(_callPeerNodeId, _callPeerIp);
+                        _ = StartCallAsync(_callPeerNodeId, _callPeerIp, _callPeerVoicePort);
                     }
                     return;
                 }
@@ -616,19 +624,21 @@ namespace MassangerMaximka
 
             _callPeerNodeId = nodeId;
             _callPeerIp = ip;
+            _callPeerVoicePort = 45679;
             _isCallingOut = true;
 
             var localIp = GetLocalIpAddress();
-            await SendCallSignalAsync(nodeId, $"{CallRequestPrefix}{localIp}");
+            var voicePort = _voice?.ListenPort ?? 45679;
+            await SendCallSignalAsync(nodeId, $"{CallRequestPrefix}{localIp}:{voicePort}");
 
             CallBtn.Text = "Cancel";
             CallBtn.BackgroundColor = Color.FromArgb("#E65100");
             VoiceStatusLabel.Text = $"Calling {nodeId}...";
             AppendChat($"[Call] Calling {nodeId}...");
-            TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} with ip={localIp}");
+            TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} ip={localIp} voice_port={voicePort}");
         }
 
-        private async Task StartCallAsync(string nodeId, IPAddress ip)
+        private async Task StartCallAsync(string nodeId, IPAddress ip, int voicePort)
         {
             if (_voice == null || _audioManager == null)
             {
@@ -636,13 +646,22 @@ namespace MassangerMaximka
                 return;
             }
 
-            _isInCall = true;
-            _callCts = new CancellationTokenSource();
+            if (!await EnsureMicPermissionAsync())
+            {
+                AppendChat("[Error] Microphone permission denied");
+                return;
+            }
 
-            var remoteVoiceEndPoint = new System.Net.IPEndPoint(ip, 45679);
+            _isInCall = true;
+            var remoteVoiceEndPoint = new System.Net.IPEndPoint(ip, voicePort);
+
             try
             {
-                _voice.Start(remoteVoiceEndPoint);
+                _voiceCallManager?.Dispose();
+                _voiceCallManager = new VoiceCallManager(_voice, _audioManager);
+                _voiceCallManager.Log += msg =>
+                    MainThread.BeginInvokeOnMainThread(() => TechLog(LogCat.System, msg));
+                _voiceCallManager.Start(remoteVoiceEndPoint);
             }
             catch (Exception ex)
             {
@@ -652,29 +671,17 @@ namespace MassangerMaximka
                 return;
             }
 
-            _voice.FrameReceived += OnCallFrameReceived;
-
             CallBtn.Text = "Hang Up";
             CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
             VoiceStatusLabel.Text = $"Call: {nodeId}";
             AppendChat($"[Call] Started call with {nodeId}");
-            TechLog(LogCat.Network, $"Voice call started -> {ip}:45679");
-
-            _ = CallRecordLoopAsync(_callCts.Token);
-            await Task.CompletedTask;
+            TechLog(LogCat.Network, $"Voice call started -> {ip}:{voicePort}");
         }
 
         private void EndCall()
         {
-            _callCts?.Cancel();
-            _callCts?.Dispose();
-            _callCts = null;
-
-            if (_voice != null)
-            {
-                _voice.FrameReceived -= OnCallFrameReceived;
-                _voice.Stop();
-            }
+            _voiceCallManager?.Dispose();
+            _voiceCallManager = null;
 
             _isInCall = false;
             _callPeerNodeId = null;
@@ -686,75 +693,11 @@ namespace MassangerMaximka
             TechLog(LogCat.Network, "Voice call ended");
         }
 
-        private async Task CallRecordLoopAsync(CancellationToken ct)
-        {
-            if (_audioManager == null || _voice == null) return;
-
-            if (!await EnsureMicPermissionAsync())
-            {
-                MainThread.BeginInvokeOnMainThread(() =>
-                {
-                    AppendChat("[Error] Microphone permission denied — call has no outgoing audio");
-                    TechLog(LogCat.System, "Mic permission denied in call record loop");
-                });
-                return;
-            }
-
-            var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "CallChunks");
-            Directory.CreateDirectory(dir);
-            int chunk = 0;
-
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    var path = Path.Combine(dir, $"chunk_{chunk++}.wav");
-                    var recorder = _audioManager.CreateRecorder();
-                    await recorder.StartAsync(path);
-                    await Task.Delay(500, ct);
-                    var source = await recorder.StopAsync();
-                    var filePath = source is FileAudioSource fs ? fs.GetFilePath() : path;
-
-                    if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath) && new FileInfo(filePath).Length > 44)
-                    {
-                        var data = await File.ReadAllBytesAsync(filePath, ct);
-                        await _voice.SendFrameAsync(data);
-                    }
-
-                    try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    TechLog(LogCat.System, $"Call record chunk error: {ex.Message}");
-                    await Task.Delay(200, ct).ConfigureAwait(false);
-                }
-            }
-        }
-
-        private void OnCallFrameReceived(byte[] data)
-        {
-            if (_audioManager == null || data.Length == 0) return;
-            try
-            {
-                var stream = new MemoryStream(data);
-                var player = _audioManager.CreatePlayer(stream);
-                player.Play();
-            }
-            catch (Exception ex)
-            {
-                MainThread.BeginInvokeOnMainThread(() =>
-                    TechLog(LogCat.System, $"Call playback error: {ex.Message}"));
-            }
-        }
-
         private async void OnAcceptCallClicked(object? sender, EventArgs e)
         {
             var fromNodeId = _incomingCallFromNodeId;
             var callerIp = _incomingCallerIp;
+            var callerVoicePort = _incomingCallerVoicePort;
             HideIncomingCallBanner();
 
             if (string.IsNullOrEmpty(fromNodeId) || callerIp == null) return;
@@ -762,7 +705,8 @@ namespace MassangerMaximka
             await SendCallSignalAsync(fromNodeId, CallAccept);
             _callPeerNodeId = fromNodeId;
             _callPeerIp = callerIp;
-            await StartCallAsync(fromNodeId, callerIp);
+            _callPeerVoicePort = callerVoicePort;
+            await StartCallAsync(fromNodeId, callerIp, callerVoicePort);
             TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId}");
         }
 
@@ -789,6 +733,7 @@ namespace MassangerMaximka
             IncomingCallBanner.IsVisible = false;
             _incomingCallFromNodeId = null;
             _incomingCallerIp = null;
+            _incomingCallerVoicePort = 0;
         }
 
         private void ResetCallingState()

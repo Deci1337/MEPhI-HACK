@@ -91,8 +91,9 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddSingleton(sp =>
-            new UdpVoiceTransport(config.VoicePort,
-                sp.GetRequiredService<ILogger<UdpVoiceTransport>>()));
+            new UdpVoiceTransport(
+                sp.GetRequiredService<ILogger<UdpVoiceTransport>>(),
+                config.VoicePort));
 
         services.AddSingleton(sp =>
             new MetricsService(config.NodeId,
