@@ -30,6 +30,8 @@ namespace MassangerMaximka
         private string? _lastReceivedVoicePath;
         private bool _isRecordingVoice;
         private string? _voiceRecordPath;
+        private bool _isInCall;
+        private CancellationTokenSource? _callCts;
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
         private readonly List<string> _chatLog = [];
@@ -97,6 +99,7 @@ namespace MassangerMaximka
 
         protected override void OnDisappearing()
         {
+            if (_isInCall) EndCall();
             if (_discovery != null) { _discovery.PeerDiscovered -= OnPeerDiscovered; _discovery.PeerLost -= OnPeerLost; }
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
             if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
@@ -496,6 +499,142 @@ namespace MassangerMaximka
             PlayVoiceFile(path);
         }
 
+        private async void OnCallButtonClicked(object? sender, EventArgs e)
+        {
+            if (_isInCall)
+            {
+                EndCall();
+                return;
+            }
+
+            var nodeId = GetSelectedOrFirstPeerNodeId();
+            if (string.IsNullOrEmpty(nodeId))
+            {
+                AppendChat("[Error] Select a peer to call");
+                return;
+            }
+
+            var ip = ResolvePeerIpAddress(nodeId);
+            if (ip == null)
+            {
+                AppendChat("[Error] Cannot resolve peer IP address");
+                return;
+            }
+
+            await StartCallAsync(nodeId, ip);
+        }
+
+        private async Task StartCallAsync(string nodeId, IPAddress ip)
+        {
+            if (_voice == null || _audioManager == null)
+            {
+                AppendChat("[Error] Voice transport or audio not available");
+                return;
+            }
+
+            _isInCall = true;
+            _callCts = new CancellationTokenSource();
+
+            var remoteVoiceEndPoint = new System.Net.IPEndPoint(ip, 45679);
+            try
+            {
+                _voice.Start(remoteVoiceEndPoint);
+            }
+            catch (Exception ex)
+            {
+                AppendChat($"[Error] Voice transport failed to start: {ex.Message}");
+                TechLog(LogCat.System, $"Voice call start error: {ex.Message}");
+                _isInCall = false;
+                return;
+            }
+
+            _voice.FrameReceived += OnCallFrameReceived;
+
+            CallBtn.Text = "Hang Up";
+            CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
+            VoiceStatusLabel.Text = $"Call: {nodeId}";
+            AppendChat($"[Call] Started call with {nodeId}");
+            TechLog(LogCat.Network, $"Voice call started -> {ip}:45679");
+
+            _ = CallRecordLoopAsync(_callCts.Token);
+            await Task.CompletedTask;
+        }
+
+        private void EndCall()
+        {
+            _callCts?.Cancel();
+            _callCts?.Dispose();
+            _callCts = null;
+
+            if (_voice != null)
+            {
+                _voice.FrameReceived -= OnCallFrameReceived;
+                _voice.Stop();
+            }
+
+            _isInCall = false;
+            CallBtn.Text = "Call";
+            CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
+            VoiceStatusLabel.Text = "Voice: idle";
+            AppendChat("[Call] Call ended");
+            TechLog(LogCat.Network, "Voice call ended");
+        }
+
+        private async Task CallRecordLoopAsync(CancellationToken ct)
+        {
+            if (_audioManager == null || _voice == null) return;
+
+            var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "CallChunks");
+            Directory.CreateDirectory(dir);
+            int chunk = 0;
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    var path = Path.Combine(dir, $"chunk_{chunk++}.wav");
+                    var recorder = _audioManager.CreateRecorder();
+                    await recorder.StartAsync(path);
+                    await Task.Delay(500, ct);
+                    var source = await recorder.StopAsync();
+                    var filePath = source is FileAudioSource fs ? fs.GetFilePath() : path;
+
+                    if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath) && new FileInfo(filePath).Length > 44)
+                    {
+                        var data = await File.ReadAllBytesAsync(filePath, ct);
+                        await _voice.SendFrameAsync(data);
+                    }
+
+                    try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    TechLog(LogCat.System, $"Call record chunk error: {ex.Message}");
+                    await Task.Delay(200, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private void OnCallFrameReceived(byte[] data)
+        {
+            if (_audioManager == null || data.Length == 0) return;
+            try
+            {
+                var stream = new MemoryStream(data);
+                var player = _audioManager.CreatePlayer(stream);
+                player.Play();
+            }
+            catch (Exception ex)
+            {
+                MainThread.BeginInvokeOnMainThread(() =>
+                    TechLog(LogCat.System, $"Call playback error: {ex.Message}"));
+            }
+        }
+
         private void OnForgetSavedPeersClicked(object? sender, EventArgs e)
         {
             _savedPeers.Clear();
@@ -652,6 +791,30 @@ namespace MassangerMaximka
             var node = string.IsNullOrWhiteSpace(nodeId) ? "" : $" ({nodeId})";
             var ep = string.IsNullOrWhiteSpace(endPoint) ? "" : $" [{endPoint}]";
             return $"{status}{displayName}{node}{ep}";
+        }
+
+        private IPAddress? ResolvePeerIpAddress(string nodeId)
+        {
+            if (_discovery?.Peers.TryGetValue(nodeId, out var peer) == true &&
+                IPAddress.TryParse(peer.IpAddress, out var discovered))
+                return discovered;
+
+            var epText = ManualIpEntry.Text?.Trim();
+            if (!string.IsNullOrEmpty(epText) && ParseEndpoint(epText, out var manualIp, out _))
+                return manualIp;
+
+            if (!string.IsNullOrEmpty(_selectedPeerNodeId))
+            {
+                var display = _peers.FirstOrDefault(p => p.Contains(_selectedPeerNodeId));
+                if (display != null)
+                {
+                    var ep = ExtractEndPoint(display);
+                    if (!string.IsNullOrEmpty(ep) && ParseEndpoint(ep, out var displayIp, out _))
+                        return displayIp;
+                }
+            }
+
+            return null;
         }
 
         private string? GetSelectedOrFirstPeerNodeId()
