@@ -87,7 +87,11 @@ public sealed class TcpChatTransport
             var msg = JsonSerializer.Deserialize<TransportChatMessage>(envelope.Payload);
             if (msg == null) return;
 
-            if (msg.ToNodeId == _nodeId)
+            var isForMe = msg.ToNodeId == _nodeId
+                       || envelope.DestinationNodeId == _nodeId
+                       || msg.FromNodeId == fromPeerNodeId;
+
+            if (isForMe)
             {
                 _logger.LogInformation("Chat from {From}: {Text}", msg.FromNodeId, msg.Text);
                 MessageReceived?.Invoke(msg);
