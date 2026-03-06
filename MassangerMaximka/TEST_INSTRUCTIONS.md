@@ -17,12 +17,15 @@ $env:HEX_TCP_PORT=45681; dotnet run -f net9.0-windows10.0.19041.0 -p MassangerMa
 Or via command line:
 ```powershell
 dotnet run -f net9.0-windows10.0.19041.0 -p MassangerMaximka -- --port 45681
+dotnet run -f net9.0-windows10.0.19041.0 -p MassangerMaximka -- --tcp-port 45681
 ```
 
 **Connect:**
 - In Instance 2: enter `127.0.0.1:45680`, click Connect (connects to Instance 1)
 - In Instance 1: enter `127.0.0.1:45681`, click Connect (connects to Instance 2)
 - Select peer, type message, click Send
+- **File:** Send File (4MB test file), Resume if paused
+- **Voice:** Voice Start (synthetic frames to peer), Voice Stop (shows metrics)
 
 ## Test on 2 PCs in LAN
 
@@ -34,10 +37,12 @@ dotnet run -f net9.0-windows10.0.19041.0 -p MassangerMaximka -- --port 45681
 
 ## Port mapping
 
-| Instance | TCP Port | Discovery Port |
-|----------|----------|----------------|
-| 1 (default) | 45680 | 45678 |
-| 2 (HEX_TCP_PORT=45681) | 45681 | 45679 |
+| Instance | TCP | Discovery | Voice |
+|----------|-----|-----------|-------|
+| 1 (default) | 45680 | 45678 | 45679 |
+| 2 (HEX_TCP_PORT=45681) | 45681 | 45679 | 45678 |
+
+For Voice: Instance 1 Voice Start -> 127.0.0.1:45680 (Instance 2). Instance 2 Voice Start -> 127.0.0.1:45679 (Instance 1).
 
 ## Firewall
 

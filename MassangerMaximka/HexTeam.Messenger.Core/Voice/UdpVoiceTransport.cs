@@ -7,10 +7,10 @@ namespace HexTeam.Messenger.Core.Voice;
 
 public sealed class UdpVoiceTransport : IDisposable
 {
-    private const int VoicePort = 45679;
-    private const int FrameSize = 960; // 20ms @ 48kHz mono (typical Opus frame)
+    private const int FrameSize = 960;
     private const int JitterBufferSize = 5;
 
+    private readonly int _localPort;
     private readonly ILogger<UdpVoiceTransport> _logger;
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
@@ -20,23 +20,26 @@ public sealed class UdpVoiceTransport : IDisposable
     private int _sequenceNumber;
 
     public bool IsActive { get; private set; }
+    public int LocalPort => _localPort;
     public VoiceMetrics Metrics { get; } = new();
 
     public event Action<byte[]>? FrameReceived;
 
-    public UdpVoiceTransport(ILogger<UdpVoiceTransport> logger)
+    public UdpVoiceTransport(int localPort, ILogger<UdpVoiceTransport> logger)
     {
+        _localPort = localPort;
         _logger = logger;
     }
 
     public void Start(IPEndPoint remoteEndPoint)
     {
+        if (IsActive) return;
         _remoteEndPoint = remoteEndPoint;
         _cts = new CancellationTokenSource();
-        _udpClient = new UdpClient(VoicePort);
+        _udpClient = new UdpClient(_localPort);
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
-        _logger.LogInformation("Voice transport started, remote={EP}", remoteEndPoint);
+        _logger.LogInformation("Voice transport started on port {Port}, remote={EP}", _localPort, remoteEndPoint);
     }
 
     public async Task SendFrameAsync(byte[] pcmData)

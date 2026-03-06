@@ -2,9 +2,11 @@ using System.Collections.ObjectModel;
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using HexTeam.Messenger.Core.Discovery;
+using HexTeam.Messenger.Core.FileTransfer;
 using HexTeam.Messenger.Core.Models;
 using HexTeam.Messenger.Core.Metrics;
 using HexTeam.Messenger.Core.Transport;
+using HexTeam.Messenger.Core.Voice;
 
 namespace MassangerMaximka
 {
@@ -13,8 +15,12 @@ namespace MassangerMaximka
         private UdpDiscoveryService? _discovery;
         private PeerConnectionService? _connections;
         private TcpChatTransport? _chat;
+        private FileTransferService? _files;
+        private UdpVoiceTransport? _voice;
         private MetricsService? _metrics;
+        private CancellationTokenSource? _voiceSendCts;
         private string? _selectedPeerNodeId;
+        private string? _lastTransferId;
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<string> _chatLog = [];
         private int _techLogCount;
@@ -35,10 +41,12 @@ namespace MassangerMaximka
             _discovery = services.GetService<UdpDiscoveryService>();
             _connections = services.GetService<PeerConnectionService>();
             _chat = services.GetService<TcpChatTransport>();
+            _files = services.GetService<FileTransferService>();
+            _voice = services.GetService<UdpVoiceTransport>();
             _metrics = services.GetService<MetricsService>();
             var config = services.GetService<NodeConfiguration>();
 
-            if (_discovery == null || _connections == null || _chat == null)
+            if (_discovery == null || _connections == null || _chat == null || _files == null)
             {
                 StatusLabel.Text = "Services not found";
                 return;
@@ -55,6 +63,8 @@ namespace MassangerMaximka
             _connections.EnvelopeReceived += OnEnvelopeReceivedLog;
             _chat.MessageReceived += OnMessageReceived;
             _chat.DeliveryStatusChanged += OnDeliveryStatusChanged;
+            _files.TransferProgressChanged += OnTransferProgressChanged;
+            _files.FileReceived += OnFileReceived;
             if (_metrics != null) _metrics.MetricsUpdated += OnMetricsUpdated;
 
             StatusLabel.Text = $"TCP: {_connections.ListenPort} | NodeId: {config?.NodeId ?? "?"}";
@@ -76,6 +86,7 @@ namespace MassangerMaximka
             if (_discovery != null) { _discovery.PeerDiscovered -= OnPeerDiscovered; _discovery.PeerLost -= OnPeerLost; }
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
             if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
+            if (_files != null) { _files.TransferProgressChanged -= OnTransferProgressChanged; _files.FileReceived -= OnFileReceived; }
             if (_metrics != null) _metrics.MetricsUpdated -= OnMetricsUpdated;
             base.OnDisappearing();
         }
@@ -136,6 +147,26 @@ namespace MassangerMaximka
         {
             MainThread.BeginInvokeOnMainThread(() =>
                 TechLog(LogCat.Protocol, $"Delivery {messageId}: {status}"));
+        }
+
+        private void OnTransferProgressChanged(TransportFileTransferInfo transfer)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                var percent = transfer.Progress * 100;
+                FileTransferLabel.Text = $"File: {transfer.State} {percent:F0}% ({transfer.ConfirmedChunks}/{transfer.TotalChunks})";
+                TechLog(LogCat.Transport, $"FILE {transfer.TransferId} {transfer.State} {transfer.ConfirmedChunks}/{transfer.TotalChunks}");
+            });
+        }
+
+        private void OnFileReceived(string transferId, string savedPath)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                FileTransferLabel.Text = $"File received: {Path.GetFileName(savedPath)}";
+                AppendChat($"[File Received] {Path.GetFileName(savedPath)}");
+                TechLog(LogCat.Protocol, $"FILE RECV complete id={transferId} path={savedPath}");
+            });
         }
 
         private Task OnEnvelopeReceivedLog(string fromPeer, TransportEnvelope env)
@@ -235,6 +266,145 @@ namespace MassangerMaximka
             ChatLogLabel.Text = "";
         }
 
+        private async void OnSendTestFileClicked(object? sender, EventArgs e)
+        {
+            if (_files == null)
+            {
+                AppendChat("[Error] File service unavailable");
+                return;
+            }
+
+            var toNodeId = GetSelectedOrFirstPeerNodeId();
+            if (string.IsNullOrEmpty(toNodeId))
+            {
+                AppendChat("[Error] Select a peer first");
+                return;
+            }
+
+            try
+            {
+                var filePath = await EnsureTestFileAsync();
+                FileTransferLabel.Text = "File: sending...";
+                TechLog(LogCat.Transport, $"FILE SEND start to={toNodeId} path={filePath}");
+                var transfer = await _files.SendFileAsync(toNodeId, filePath);
+                _lastTransferId = transfer.TransferId;
+                AppendChat($"[File] Sent test file to {toNodeId}");
+                TechLog(LogCat.Protocol, $"FILE SENT id={transfer.TransferId} status={transfer.State}");
+            }
+            catch (Exception ex)
+            {
+                AppendChat($"[Error] File send failed: {ex.Message}");
+                TechLog(LogCat.System, $"File send failed: {ex.Message}");
+            }
+        }
+
+        private async void OnResumeFileClicked(object? sender, EventArgs e)
+        {
+            if (_files == null || string.IsNullOrEmpty(_lastTransferId))
+            {
+                AppendChat("[Error] No paused transfer to resume");
+                return;
+            }
+
+            try
+            {
+                FileTransferLabel.Text = "File: resuming...";
+                var transfer = await _files.ResumeTransferAsync(_lastTransferId);
+                if (transfer == null)
+                {
+                    AppendChat("[Error] Resume failed");
+                    return;
+                }
+
+                AppendChat($"[File] Resume requested for {_lastTransferId}");
+                TechLog(LogCat.Protocol, $"FILE RESUME id={_lastTransferId} confirmed={transfer.ConfirmedChunks}");
+            }
+            catch (Exception ex)
+            {
+                AppendChat($"[Error] Resume failed: {ex.Message}");
+                TechLog(LogCat.System, $"File resume failed: {ex.Message}");
+            }
+        }
+
+        private void OnVoiceStartClicked(object? sender, EventArgs e)
+        {
+            if (_voice == null || _voice.IsActive)
+            {
+                AppendChat("[Error] Voice unavailable or already active");
+                return;
+            }
+
+            var toNodeId = GetSelectedOrFirstPeerNodeId();
+            if (string.IsNullOrEmpty(toNodeId))
+            {
+                AppendChat("[Error] Select a peer first for voice");
+                return;
+            }
+
+            if (!ParseEndpoint(ManualIpEntry.Text?.Trim() ?? "", out var ip, out var port))
+            {
+                ip = IPAddress.Loopback;
+                port = _voice.LocalPort == 45679 ? 45680 : 45679;
+            }
+            else
+            {
+                var config = MauiProgram.AppInstance?.Services.GetService<NodeConfiguration>();
+                var otherVoicePort = config?.VoicePort == 45679 ? 45680 : 45679;
+                port = otherVoicePort;
+            }
+
+            var remoteEp = new IPEndPoint(ip, port);
+            try
+            {
+                _voice.Start(remoteEp);
+                _voice.FrameReceived += OnVoiceFrameReceived;
+                VoiceStatusLabel.Text = $"Voice: ON -> {remoteEp}";
+                TechLog(LogCat.Network, $"Voice started: local={_voice.LocalPort} remote={remoteEp}");
+
+                _voiceSendCts = new CancellationTokenSource();
+                _ = SendSyntheticVoiceAsync(_voiceSendCts.Token);
+            }
+            catch (Exception ex)
+            {
+                AppendChat($"[Error] Voice start failed: {ex.Message}");
+                TechLog(LogCat.System, $"Voice start failed: {ex.Message}");
+            }
+        }
+
+        private void OnVoiceStopClicked(object? sender, EventArgs e)
+        {
+            if (_voice == null || !_voice.IsActive) return;
+
+            _voiceSendCts?.Cancel();
+            _voice.FrameReceived -= OnVoiceFrameReceived;
+            _voice.Stop();
+
+            var m = _voice.Metrics;
+            VoiceStatusLabel.Text = "Voice: off";
+            AppendChat($"[Voice] Stopped. Sent={m.FramesSent} Recv={m.FramesReceived} Loss={m.PacketLossPercent:F1}%");
+            TechLog(LogCat.Metrics, $"Voice final: sent={m.FramesSent} recv={m.FramesReceived} avgLat={m.AvgLatencyMs:F1}ms jitter={m.JitterMs:F1}ms loss={m.PacketLossPercent:F1}%");
+        }
+
+        private void OnVoiceFrameReceived(byte[] data)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                var m = _voice!.Metrics;
+                VoiceStatusLabel.Text = $"Voice: ON | lat={m.AvgLatencyMs:F0}ms jit={m.JitterMs:F0}ms recv={m.FramesReceived}";
+            });
+        }
+
+        private async Task SendSyntheticVoiceAsync(CancellationToken ct)
+        {
+            var buffer = new byte[960];
+            while (!ct.IsCancellationRequested && _voice != null && _voice.IsActive)
+            {
+                Random.Shared.NextBytes(buffer);
+                await _voice.SendFrameAsync(buffer);
+                await Task.Delay(20, ct);
+            }
+        }
+
         private void OnClearLogsClicked(object? sender, EventArgs e)
         {
             _suppressTechLog = true;
@@ -324,6 +494,29 @@ namespace MassangerMaximka
             var s = display.IndexOf('(') + 1;
             var e = display.IndexOf(')');
             return s > 0 && e > s ? display[s..e] : null;
+        }
+
+        private string? GetSelectedOrFirstPeerNodeId()
+        {
+            if (!string.IsNullOrEmpty(_selectedPeerNodeId))
+                return _selectedPeerNodeId;
+
+            return _peers.Count > 0 ? ExtractNodeId(_peers[0]) : null;
+        }
+
+        private static async Task<string> EnsureTestFileAsync()
+        {
+            var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "TestFiles");
+            Directory.CreateDirectory(dir);
+
+            var path = Path.Combine(dir, "transport-test.bin");
+            if (File.Exists(path) && new FileInfo(path).Length >= 4 * 1024 * 1024)
+                return path;
+
+            var buffer = new byte[4 * 1024 * 1024];
+            Random.Shared.NextBytes(buffer);
+            await File.WriteAllBytesAsync(path, buffer);
+            return path;
         }
 
         private enum LogCat { System, Network, Transport, Protocol, Discovery, Encryption, Metrics, Relay }

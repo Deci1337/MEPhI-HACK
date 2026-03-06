@@ -23,11 +23,13 @@ namespace MassangerMaximka
 
             var tcpPort = GetPortFromEnvOrArgs();
             var discoveryPort = tcpPort - 2;
+            var voicePort = tcpPort - 1;
             builder.Services.AddHexMessengerCore(new NodeConfiguration
             {
                 DisplayName = DeviceInfo.Name,
                 TcpPort = tcpPort,
                 DiscoveryPort = discoveryPort,
+                VoicePort = voicePort,
                 IsRelay = false
             });
 
@@ -43,7 +45,7 @@ namespace MassangerMaximka
                 return port;
             var args = Environment.GetCommandLineArgs();
             for (var i = 0; i < args.Length - 1; i++)
-                if ((args[i] == "--port" || args[i] == "-p") && int.TryParse(args[i + 1], out port) && port > 1024 && port < 65535)
+                if ((args[i] == "--port" || args[i] == "-p" || args[i] == "--tcp-port") && int.TryParse(args[i + 1], out port) && port > 1024 && port < 65535)
                     return port;
             return 45680;
         }

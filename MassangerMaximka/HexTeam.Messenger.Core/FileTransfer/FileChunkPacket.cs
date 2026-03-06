@@ -18,3 +18,7 @@ public sealed record FileChunkAckPacket(
     string TransferId,
     int ChunkIndex,
     bool Success);
+
+public sealed record FileResumeRequestPacket(
+    string TransferId,
+    int LastAckedChunkIndex);

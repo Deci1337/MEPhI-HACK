@@ -34,6 +34,18 @@
                     <Button Text="Clear" Grid.Column="2" Clicked="OnClearChatClicked" FontSize="11" Padding="6,4" BackgroundColor="#555" />
                 </Grid>
 
+                <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="5">
+                    <Button Text="Send File" Grid.Column="0" Clicked="OnSendTestFileClicked" FontSize="11" Padding="6,4" />
+                    <Button Text="Resume" Grid.Column="1" Clicked="OnResumeFileClicked" FontSize="11" Padding="6,4" />
+                    <Label x:Name="FileTransferLabel" Grid.Column="2" Text="File: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
+                </Grid>
+
+                <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="5">
+                    <Button Text="Voice Start" Grid.Column="0" Clicked="OnVoiceStartClicked" FontSize="11" Padding="6,4" />
+                    <Button Text="Voice Stop" Grid.Column="1" Clicked="OnVoiceStopClicked" FontSize="11" Padding="6,4" />
+                    <Label x:Name="VoiceStatusLabel" Grid.Column="2" Text="Voice: off" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
+                </Grid>
+
                 <Frame BorderColor="LightGray" Padding="8" HeightRequest="140">
                     <ScrollView x:Name="ChatScrollView">
                         <Label x:Name="ChatLogLabel" Text="" LineBreakMode="WordWrap" FontSize="12" />
