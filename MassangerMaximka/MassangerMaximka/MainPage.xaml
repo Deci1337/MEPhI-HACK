@@ -31,7 +31,7 @@
                     <Button Text="Forget Saved" Grid.Column="2" Clicked="OnForgetSavedPeersClicked" FontSize="11" Padding="8,4" BackgroundColor="#6D4C41" />
                 </Grid>
 
-                <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="" FontSize="12" />
+                <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="Gray" FontSize="12" />
 
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
                     <Entry x:Name="MessageEntry" Placeholder="Type message..." Grid.Column="0" FontSize="13" />
@@ -52,6 +52,19 @@
                     <Button x:Name="CallBtn" Text="Call" Grid.Column="3" Clicked="OnCallButtonClicked" FontSize="11" Padding="6,4" BackgroundColor="#2E7D32" />
                     <Label x:Name="VoiceStatusLabel" Grid.Column="4" Text="Voice: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
                 </Grid>
+
+                <!-- Incoming Call Banner -->
+                <Frame x:Name="IncomingCallBanner" IsVisible="False" BackgroundColor="#1B5E20"
+                       BorderColor="#4CAF50" Padding="10" CornerRadius="8">
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                        <Label x:Name="IncomingCallLabel" Text="Incoming call" TextColor="White"
+                               FontSize="13" FontAttributes="Bold" VerticalOptions="Center" Grid.Column="0" />
+                        <Button Text="Accept" Grid.Column="1" Clicked="OnAcceptCallClicked"
+                                FontSize="11" Padding="8,4" BackgroundColor="#2E7D32" TextColor="White" />
+                        <Button Text="Decline" Grid.Column="2" Clicked="OnDeclineCallClicked"
+                                FontSize="11" Padding="8,4" BackgroundColor="#B71C1C" TextColor="White" />
+                    </Grid>
+                </Frame>
 
                 <Frame BorderColor="LightGray" Padding="8" HeightRequest="140">
                     <ScrollView x:Name="ChatScrollView">

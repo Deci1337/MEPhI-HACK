@@ -33,7 +33,17 @@ namespace MassangerMaximka
         private bool _isRecordingVoice;
         private string? _voiceRecordPath;
         private bool _isInCall;
+        private bool _isCallingOut;
+        private string? _callPeerNodeId;
+        private IPAddress? _callPeerIp;
+        private string? _incomingCallFromNodeId;
+        private IPAddress? _incomingCallerIp;
         private CancellationTokenSource? _callCts;
+
+        private const string CallRequestPrefix = "\x1FCALL_REQUEST:";
+        private const string CallAccept = "\x1FCALL_ACCEPT";
+        private const string CallReject = "\x1FCALL_REJECT";
+        private const string CallEnd = "\x1FCALL_END";
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
         private readonly List<string> _chatLog = [];
@@ -101,7 +111,12 @@ namespace MassangerMaximka
 
         protected override void OnDisappearing()
         {
-            if (_isInCall) EndCall();
+            if (_isInCall || _isCallingOut)
+            {
+                _ = SendCallSignalAsync(_callPeerNodeId, CallEnd);
+                if (_isInCall) EndCall();
+                else ResetCallingState();
+            }
             if (_discovery != null) { _discovery.PeerDiscovered -= OnPeerDiscovered; _discovery.PeerLost -= OnPeerLost; }
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
             if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
@@ -161,9 +176,59 @@ namespace MassangerMaximka
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
-                AppendChat($"{msg.FromNodeId}: {msg.Text}");
+                var text = msg.Text;
+
+                if (text.StartsWith(CallRequestPrefix, StringComparison.Ordinal))
+                {
+                    var ipStr = text[CallRequestPrefix.Length..];
+                    if (!_isInCall && !_isCallingOut && IPAddress.TryParse(ipStr, out var callerIp))
+                    {
+                        _incomingCallFromNodeId = msg.FromNodeId;
+                        _incomingCallerIp = callerIp;
+                        ShowIncomingCallBanner(msg.FromNodeId);
+                    }
+                    else
+                    {
+                        _ = SendCallSignalAsync(msg.FromNodeId, CallReject);
+                    }
+                    TechLog(LogCat.Protocol, $"CALL_REQUEST from {msg.FromNodeId}");
+                    return;
+                }
+
+                if (text == CallAccept)
+                {
+                    if (_isCallingOut && _callPeerNodeId == msg.FromNodeId && _callPeerIp != null)
+                    {
+                        _isCallingOut = false;
+                        TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId}");
+                        _ = StartCallAsync(_callPeerNodeId, _callPeerIp);
+                    }
+                    return;
+                }
+
+                if (text == CallReject)
+                {
+                    if (_isCallingOut)
+                    {
+                        AppendChat($"[Call] {msg.FromNodeId} declined the call");
+                        ResetCallingState();
+                        TechLog(LogCat.Protocol, $"CALL_REJECT from {msg.FromNodeId}");
+                    }
+                    return;
+                }
+
+                if (text == CallEnd)
+                {
+                    HideIncomingCallBanner();
+                    if (_isInCall) EndCall();
+                    else if (_isCallingOut) ResetCallingState();
+                    TechLog(LogCat.Protocol, $"CALL_END from {msg.FromNodeId}");
+                    return;
+                }
+
+                AppendChat($"{msg.FromNodeId}: {text}");
                 TechLog(LogCat.Protocol, $"RECV ChatPacket id={msg.MessageId} from={msg.FromNodeId}");
-                TechLog(LogCat.Encryption, $"Payload deserialized: {msg.Text.Length} chars, ts={msg.TimestampUtc}");
+                TechLog(LogCat.Encryption, $"Payload deserialized: {text.Length} chars, ts={msg.TimestampUtc}");
             });
         }
 
@@ -421,6 +486,11 @@ namespace MassangerMaximka
                 AppendChat(_audioManager == null ? "[Error] Audio not available" : "[Error] Already recording");
                 return;
             }
+            if (!await EnsureMicPermissionAsync())
+            {
+                AppendChat("[Error] Microphone permission denied");
+                return;
+            }
             try
             {
                 var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "VoiceMessages");
@@ -522,9 +592,11 @@ namespace MassangerMaximka
 
         private async void OnCallButtonClicked(object? sender, EventArgs e)
         {
-            if (_isInCall)
+            if (_isInCall || _isCallingOut)
             {
-                EndCall();
+                _ = SendCallSignalAsync(_callPeerNodeId, CallEnd);
+                if (_isInCall) EndCall();
+                else ResetCallingState();
                 return;
             }
 
@@ -542,7 +614,18 @@ namespace MassangerMaximka
                 return;
             }
 
-            await StartCallAsync(nodeId, ip);
+            _callPeerNodeId = nodeId;
+            _callPeerIp = ip;
+            _isCallingOut = true;
+
+            var localIp = GetLocalIpAddress();
+            await SendCallSignalAsync(nodeId, $"{CallRequestPrefix}{localIp}");
+
+            CallBtn.Text = "Cancel";
+            CallBtn.BackgroundColor = Color.FromArgb("#E65100");
+            VoiceStatusLabel.Text = $"Calling {nodeId}...";
+            AppendChat($"[Call] Calling {nodeId}...");
+            TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} with ip={localIp}");
         }
 
         private async Task StartCallAsync(string nodeId, IPAddress ip)
@@ -594,6 +677,8 @@ namespace MassangerMaximka
             }
 
             _isInCall = false;
+            _callPeerNodeId = null;
+            _callPeerIp = null;
             CallBtn.Text = "Call";
             CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
             VoiceStatusLabel.Text = "Voice: idle";
@@ -604,6 +689,16 @@ namespace MassangerMaximka
         private async Task CallRecordLoopAsync(CancellationToken ct)
         {
             if (_audioManager == null || _voice == null) return;
+
+            if (!await EnsureMicPermissionAsync())
+            {
+                MainThread.BeginInvokeOnMainThread(() =>
+                {
+                    AppendChat("[Error] Microphone permission denied — call has no outgoing audio");
+                    TechLog(LogCat.System, "Mic permission denied in call record loop");
+                });
+                return;
+            }
 
             var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "CallChunks");
             Directory.CreateDirectory(dir);
@@ -654,6 +749,83 @@ namespace MassangerMaximka
                 MainThread.BeginInvokeOnMainThread(() =>
                     TechLog(LogCat.System, $"Call playback error: {ex.Message}"));
             }
+        }
+
+        private async void OnAcceptCallClicked(object? sender, EventArgs e)
+        {
+            var fromNodeId = _incomingCallFromNodeId;
+            var callerIp = _incomingCallerIp;
+            HideIncomingCallBanner();
+
+            if (string.IsNullOrEmpty(fromNodeId) || callerIp == null) return;
+
+            await SendCallSignalAsync(fromNodeId, CallAccept);
+            _callPeerNodeId = fromNodeId;
+            _callPeerIp = callerIp;
+            await StartCallAsync(fromNodeId, callerIp);
+            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId}");
+        }
+
+        private async void OnDeclineCallClicked(object? sender, EventArgs e)
+        {
+            var fromNodeId = _incomingCallFromNodeId;
+            HideIncomingCallBanner();
+
+            if (string.IsNullOrEmpty(fromNodeId)) return;
+
+            await SendCallSignalAsync(fromNodeId, CallReject);
+            AppendChat($"[Call] Declined call from {fromNodeId}");
+            TechLog(LogCat.Protocol, $"CALL_REJECT sent to {fromNodeId}");
+        }
+
+        private void ShowIncomingCallBanner(string fromNodeId)
+        {
+            IncomingCallLabel.Text = $"Incoming call from {fromNodeId}";
+            IncomingCallBanner.IsVisible = true;
+        }
+
+        private void HideIncomingCallBanner()
+        {
+            IncomingCallBanner.IsVisible = false;
+            _incomingCallFromNodeId = null;
+            _incomingCallerIp = null;
+        }
+
+        private void ResetCallingState()
+        {
+            _isCallingOut = false;
+            _callPeerNodeId = null;
+            _callPeerIp = null;
+            CallBtn.Text = "Call";
+            CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
+            VoiceStatusLabel.Text = "Voice: idle";
+        }
+
+        private async Task SendCallSignalAsync(string? nodeId, string signal)
+        {
+            if (_chat == null || string.IsNullOrEmpty(nodeId)) return;
+            try { await _chat.SendMessageAsync(nodeId, signal); }
+            catch { }
+        }
+
+        private static string GetLocalIpAddress()
+        {
+            try
+            {
+                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+                return host.AddressList
+                    .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    ?.ToString() ?? "127.0.0.1";
+            }
+            catch { return "127.0.0.1"; }
+        }
+
+        private static async Task<bool> EnsureMicPermissionAsync()
+        {
+            var status = await Permissions.CheckStatusAsync<Permissions.Microphone>();
+            if (status != PermissionStatus.Granted)
+                status = await Permissions.RequestAsync<Permissions.Microphone>();
+            return status == PermissionStatus.Granted;
         }
 
         private void OnForgetSavedPeersClicked(object? sender, EventArgs e)
