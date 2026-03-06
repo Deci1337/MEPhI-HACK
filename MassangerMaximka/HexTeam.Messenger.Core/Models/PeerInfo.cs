@@ -4,6 +4,7 @@ namespace HexTeam.Messenger.Core.Models;
 
 public sealed class PeerInfo
 {
+    public string NodeKey { get; init; } = string.Empty;
     public Guid NodeId { get; init; }
     public string DisplayName { get; init; } = string.Empty;
     public string Fingerprint { get; init; } = string.Empty;
@@ -19,6 +20,7 @@ public sealed class PeerInfo
         var guid = Guid.TryParse(nodeId, out var g) ? g : CreateGuidFromString(nodeId);
         return new PeerInfo
         {
+            NodeKey = nodeId,
             NodeId = guid,
             DisplayName = displayName,
             Fingerprint = nodeId.Length >= 8 ? nodeId[..8] : nodeId,

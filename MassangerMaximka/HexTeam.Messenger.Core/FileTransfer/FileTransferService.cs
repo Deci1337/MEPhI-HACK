@@ -188,8 +188,8 @@ public sealed class FileTransferService
 
     private async Task HandleFileComplete(TransportEnvelope envelope)
     {
-        var data = JsonSerializer.Deserialize<JsonElement>(envelope.Payload);
-        var transferId = data.GetProperty("transferId").GetString();
+        var packet = JsonSerializer.Deserialize<FileCompletePacket>(envelope.Payload);
+        var transferId = packet?.TransferId;
         if (transferId == null || !_receiving.TryGetValue(transferId, out var ctx)) return;
 
         if (!HasAllChunks(ctx))
@@ -312,7 +312,7 @@ public sealed class FileTransferService
 
             transfer.State = FileTransferState.Completed;
             await SendEnvelopeAsync(context.ToPeerNodeId, TransportPacketType.FileComplete,
-                new { transfer.TransferId }, ct);
+                new FileCompletePacket(transfer.TransferId), ct);
 
             _sending.TryRemove(transfer.TransferId, out _);
             TransferProgressChanged?.Invoke(transfer);

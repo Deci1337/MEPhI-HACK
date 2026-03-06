@@ -42,6 +42,7 @@ public sealed class UdpDiscoveryService : IDisposable
     {
         _cts = new CancellationTokenSource();
         _udpClient = new UdpClient();
+        _udpClient.Client.ExclusiveAddressUse = false;
         _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, _discoveryPort));
         _udpClient.EnableBroadcast = true;
@@ -77,14 +78,15 @@ public sealed class UdpDiscoveryService : IDisposable
     {
         var beacon = new DiscoveryBeacon(_nodeId, _displayName, _tcpPort, _isRelay);
         var data = JsonSerializer.SerializeToUtf8Bytes(beacon);
-        var broadcastEp = new IPEndPoint(IPAddress.Broadcast, _discoveryPort);
+        var broadcastPorts = GetBroadcastPorts().Select(port => new IPEndPoint(IPAddress.Broadcast, port)).ToArray();
 
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 if (_udpClient != null)
-                    await _udpClient.SendAsync(data, data.Length, broadcastEp);
+                    foreach (var broadcastEp in broadcastPorts)
+                        await _udpClient.SendAsync(data, data.Length, broadcastEp);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -146,5 +148,11 @@ public sealed class UdpDiscoveryService : IDisposable
     {
         Stop();
         _cts?.Dispose();
+    }
+
+    private IEnumerable<int> GetBroadcastPorts()
+    {
+        var ports = new[] { 45678, 45679, _discoveryPort - 1, _discoveryPort, _discoveryPort + 1 };
+        return ports.Where(port => port > 1024 && port < 65535).Distinct();
     }
 }

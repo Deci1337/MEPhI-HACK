@@ -31,14 +31,20 @@ public sealed class UdpVoiceTransport : IDisposable
         _logger = logger;
     }
 
-    public void Start(IPEndPoint remoteEndPoint)
+    public void StartListening()
     {
         if (IsActive) return;
-        _remoteEndPoint = remoteEndPoint;
         _cts = new CancellationTokenSource();
         _udpClient = new UdpClient(_localPort);
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
+        _logger.LogInformation("Voice transport listening on port {Port}", _localPort);
+    }
+
+    public void Start(IPEndPoint remoteEndPoint)
+    {
+        _remoteEndPoint = remoteEndPoint;
+        StartListening();
         _logger.LogInformation("Voice transport started on port {Port}, remote={EP}", _localPort, remoteEndPoint);
     }
 

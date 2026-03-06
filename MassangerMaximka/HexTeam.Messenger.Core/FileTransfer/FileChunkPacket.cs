@@ -22,3 +22,6 @@ public sealed record FileChunkAckPacket(
 public sealed record FileResumeRequestPacket(
     string TransferId,
     int LastAckedChunkIndex);
+
+public sealed record FileCompletePacket(
+    string TransferId);

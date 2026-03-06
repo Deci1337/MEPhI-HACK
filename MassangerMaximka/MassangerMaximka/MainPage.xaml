@@ -35,7 +35,7 @@
                 </Grid>
 
                 <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="5">
-                    <Button Text="Send File" Grid.Column="0" Clicked="OnSendTestFileClicked" FontSize="11" Padding="6,4" />
+                    <Button Text="Pick File" Grid.Column="0" Clicked="OnSendTestFileClicked" FontSize="11" Padding="6,4" />
                     <Button Text="Resume" Grid.Column="1" Clicked="OnResumeFileClicked" FontSize="11" Padding="6,4" />
                     <Label x:Name="FileTransferLabel" Grid.Column="2" Text="File: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
                 </Grid>

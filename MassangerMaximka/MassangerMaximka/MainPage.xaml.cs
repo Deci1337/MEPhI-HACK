@@ -19,6 +19,8 @@ namespace MassangerMaximka
         private UdpVoiceTransport? _voice;
         private MetricsService? _metrics;
         private CancellationTokenSource? _voiceSendCts;
+        private readonly HashSet<string> _autoConnectInFlight = [];
+        private string? _localNodeId;
         private string? _selectedPeerNodeId;
         private string? _lastTransferId;
         private readonly ObservableCollection<string> _peers = [];
@@ -45,6 +47,7 @@ namespace MassangerMaximka
             _voice = services.GetService<UdpVoiceTransport>();
             _metrics = services.GetService<MetricsService>();
             var config = services.GetService<NodeConfiguration>();
+            _localNodeId = config?.NodeId;
 
             if (_discovery == null || _connections == null || _chat == null || _files == null)
             {
@@ -65,11 +68,16 @@ namespace MassangerMaximka
             _chat.DeliveryStatusChanged += OnDeliveryStatusChanged;
             _files.TransferProgressChanged += OnTransferProgressChanged;
             _files.FileReceived += OnFileReceived;
+            if (_voice != null)
+            {
+                _voice.StartListening();
+                _voice.FrameReceived += OnVoiceFrameReceived;
+            }
             if (_metrics != null) _metrics.MetricsUpdated += OnMetricsUpdated;
 
             StatusLabel.Text = $"TCP: {_connections.ListenPort} | NodeId: {config?.NodeId ?? "?"}";
             var otherPort = _connections.ListenPort == 45680 ? 45681 : 45680;
-            PortHintLabel.Text = $"Connect to other instance: 127.0.0.1:{otherPort}";
+            PortHintLabel.Text = $"Auto-discovery enabled. Fallback connect: 127.0.0.1:{otherPort}";
 
             TechLog(LogCat.System, $"Node started: {config?.NodeId}");
             TechLog(LogCat.Network, $"TCP listening on port {_connections.ListenPort}");
@@ -77,6 +85,7 @@ namespace MassangerMaximka
             TechLog(LogCat.Encryption, $"Envelope serialization: length-prefixed JSON over TCP");
             TechLog(LogCat.Encryption, $"File integrity: SHA256 chunk + full-file hash");
             TechLog(LogCat.Protocol, $"MaxHops={ProtocolConstants.MaxHops}, AckTimeout={ProtocolConstants.AckTimeout.TotalSeconds}s, Retry={ProtocolConstants.MaxRetryCount}, Hash={ProtocolConstants.HashAlgorithm}");
+            if (_voice != null) VoiceStatusLabel.Text = $"Voice: listening on {_voice.LocalPort}";
 
             RefreshPeersList();
         }
@@ -87,6 +96,8 @@ namespace MassangerMaximka
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
             if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
             if (_files != null) { _files.TransferProgressChanged -= OnTransferProgressChanged; _files.FileReceived -= OnFileReceived; }
+            if (_voice != null) { _voice.FrameReceived -= OnVoiceFrameReceived; _voice.Stop(); }
+            _voiceSendCts?.Cancel();
             if (_metrics != null) _metrics.MetricsUpdated -= OnMetricsUpdated;
             base.OnDisappearing();
         }
@@ -100,6 +111,7 @@ namespace MassangerMaximka
                 RefreshPeersList();
                 StatusLabel.Text = $"TCP: {_connections?.ListenPort ?? 0} | Peers: {_peers.Count}";
                 TechLog(LogCat.Discovery, $"Peer discovered: {peer.DisplayName} ({peer.NodeId}) at {peer.EndPoint}");
+                _ = TryAutoConnectPeerAsync(peer);
             });
         }
 
@@ -108,6 +120,7 @@ namespace MassangerMaximka
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 RefreshPeersList();
+                _autoConnectInFlight.Remove(nodeId);
                 TechLog(LogCat.Discovery, $"Peer lost: {nodeId}");
             });
         }
@@ -117,6 +130,7 @@ namespace MassangerMaximka
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 RefreshPeersList();
+                _autoConnectInFlight.Remove(nodeId);
                 AppendChat($"[Connected] {nodeId}");
                 TechLog(LogCat.Network, $"TCP connected: {nodeId}");
                 TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
@@ -154,7 +168,7 @@ namespace MassangerMaximka
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 var percent = transfer.Progress * 100;
-                FileTransferLabel.Text = $"File: {transfer.State} {percent:F0}% ({transfer.ConfirmedChunks}/{transfer.TotalChunks})";
+                FileTransferLabel.Text = $"File: {transfer.FileName} {transfer.State} {percent:F0}% ({transfer.ConfirmedChunks}/{transfer.TotalChunks})";
                 TechLog(LogCat.Transport, $"FILE {transfer.TransferId} {transfer.State} {transfer.ConfirmedChunks}/{transfer.TotalChunks}");
             });
         }
@@ -283,12 +297,20 @@ namespace MassangerMaximka
 
             try
             {
-                var filePath = await EnsureTestFileAsync();
+                var filePath = await PickOrCreateTestFileAsync();
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Length == 0)
+                {
+                    AppendChat("[Error] Empty files are not supported for demo send");
+                    FileTransferLabel.Text = $"File: {fileInfo.Name} is empty";
+                    return;
+                }
+
                 FileTransferLabel.Text = "File: sending...";
                 TechLog(LogCat.Transport, $"FILE SEND start to={toNodeId} path={filePath}");
                 var transfer = await _files.SendFileAsync(toNodeId, filePath);
                 _lastTransferId = transfer.TransferId;
-                AppendChat($"[File] Sent test file to {toNodeId}");
+                AppendChat($"[File] Sent {Path.GetFileName(filePath)} to {toNodeId}");
                 TechLog(LogCat.Protocol, $"FILE SENT id={transfer.TransferId} status={transfer.State}");
             }
             catch (Exception ex)
@@ -328,9 +350,9 @@ namespace MassangerMaximka
 
         private void OnVoiceStartClicked(object? sender, EventArgs e)
         {
-            if (_voice == null || _voice.IsActive)
+            if (_voice == null || _voiceSendCts != null)
             {
-                AppendChat("[Error] Voice unavailable or already active");
+                AppendChat("[Error] Voice unavailable or already sending");
                 return;
             }
 
@@ -341,24 +363,15 @@ namespace MassangerMaximka
                 return;
             }
 
-            if (!ParseEndpoint(ManualIpEntry.Text?.Trim() ?? "", out var ip, out var port))
+            if (!TryGetVoiceEndpoint(out var remoteEp))
             {
-                ip = IPAddress.Loopback;
-                port = _voice.LocalPort == 45679 ? 45680 : 45679;
+                AppendChat("[Error] Enter peer IP:port first for voice");
+                return;
             }
-            else
-            {
-                var config = MauiProgram.AppInstance?.Services.GetService<NodeConfiguration>();
-                var otherVoicePort = config?.VoicePort == 45679 ? 45680 : 45679;
-                port = otherVoicePort;
-            }
-
-            var remoteEp = new IPEndPoint(ip, port);
             try
             {
                 _voice.Start(remoteEp);
-                _voice.FrameReceived += OnVoiceFrameReceived;
-                VoiceStatusLabel.Text = $"Voice: ON -> {remoteEp}";
+                VoiceStatusLabel.Text = $"Voice: sending -> {remoteEp}";
                 TechLog(LogCat.Network, $"Voice started: local={_voice.LocalPort} remote={remoteEp}");
 
                 _voiceSendCts = new CancellationTokenSource();
@@ -373,14 +386,13 @@ namespace MassangerMaximka
 
         private void OnVoiceStopClicked(object? sender, EventArgs e)
         {
-            if (_voice == null || !_voice.IsActive) return;
+            if (_voice == null || _voiceSendCts == null) return;
 
             _voiceSendCts?.Cancel();
-            _voice.FrameReceived -= OnVoiceFrameReceived;
-            _voice.Stop();
+            _voiceSendCts = null;
 
             var m = _voice.Metrics;
-            VoiceStatusLabel.Text = "Voice: off";
+            VoiceStatusLabel.Text = $"Voice: listening on {_voice.LocalPort}";
             AppendChat($"[Voice] Stopped. Sent={m.FramesSent} Recv={m.FramesReceived} Loss={m.PacketLossPercent:F1}%");
             TechLog(LogCat.Metrics, $"Voice final: sent={m.FramesSent} recv={m.FramesReceived} avgLat={m.AvgLatencyMs:F1}ms jitter={m.JitterMs:F1}ms loss={m.PacketLossPercent:F1}%");
         }
@@ -390,7 +402,7 @@ namespace MassangerMaximka
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 var m = _voice!.Metrics;
-                VoiceStatusLabel.Text = $"Voice: ON | lat={m.AvgLatencyMs:F0}ms jit={m.JitterMs:F0}ms recv={m.FramesReceived}";
+                VoiceStatusLabel.Text = $"Voice: recv={m.FramesReceived} lat={m.AvgLatencyMs:F0}ms jit={m.JitterMs:F0}ms";
             });
         }
 
@@ -502,6 +514,91 @@ namespace MassangerMaximka
                 return _selectedPeerNodeId;
 
             return _peers.Count > 0 ? ExtractNodeId(_peers[0]) : null;
+        }
+
+        private bool TryGetVoiceEndpoint(out IPEndPoint endPoint)
+        {
+            if (ParseEndpoint(ManualIpEntry.Text?.Trim() ?? "", out var ip, out var tcpPort))
+            {
+                endPoint = new IPEndPoint(ip, tcpPort + 100);
+                return true;
+            }
+
+            if (_connections != null)
+            {
+                var otherTcpPort = _connections.ListenPort == 45680 ? 45681 : 45680;
+                endPoint = new IPEndPoint(IPAddress.Loopback, otherTcpPort + 100);
+                return true;
+            }
+
+            endPoint = new IPEndPoint(IPAddress.Loopback, 45780);
+            return false;
+        }
+
+        private async Task TryAutoConnectPeerAsync(PeerInfo peer)
+        {
+            if (_connections == null || string.IsNullOrEmpty(peer.NodeKey))
+                return;
+
+            if (_connections.IsConnected(peer.NodeKey))
+                return;
+
+            if (string.Equals(peer.NodeKey, _localNodeId, StringComparison.Ordinal))
+                return;
+
+            // Only one side initiates connect to avoid simultaneous outgoing connections.
+            if (!ShouldInitiateAutoConnect(peer.NodeKey))
+                return;
+
+            if (!_autoConnectInFlight.Add(peer.NodeKey))
+                return;
+
+            try
+            {
+                var endPoint = new IPEndPoint(IPAddress.Parse(peer.IpAddress), peer.Port);
+                TechLog(LogCat.Discovery, $"Auto-connect -> {peer.DisplayName} ({peer.EndPoint})");
+                var connected = await _connections.ConnectToPeerAsync(peer.NodeKey, endPoint);
+                if (connected)
+                    TechLog(LogCat.Network, $"Auto-connected to {peer.NodeKey}");
+                else
+                    TechLog(LogCat.Network, $"Auto-connect failed for {peer.NodeKey}");
+            }
+            catch (Exception ex)
+            {
+                TechLog(LogCat.System, $"Auto-connect error for {peer.NodeKey}: {ex.Message}");
+            }
+            finally
+            {
+                _autoConnectInFlight.Remove(peer.NodeKey);
+                RefreshPeersList();
+            }
+        }
+
+        private bool ShouldInitiateAutoConnect(string remoteNodeId)
+        {
+            if (string.IsNullOrEmpty(_localNodeId))
+                return true;
+
+            return string.Compare(_localNodeId, remoteNodeId, StringComparison.Ordinal) < 0;
+        }
+
+        private static async Task<string> PickOrCreateTestFileAsync()
+        {
+            try
+            {
+                var result = await FilePicker.Default.PickAsync(new PickOptions
+                {
+                    PickerTitle = "Select file to send"
+                });
+
+                if (result != null && !string.IsNullOrWhiteSpace(result.FullPath))
+                    return result.FullPath;
+            }
+            catch
+            {
+            }
+
+            return await EnsureTestFileAsync();
         }
 
         private static async Task<string> EnsureTestFileAsync()

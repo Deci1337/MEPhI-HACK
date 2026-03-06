@@ -23,7 +23,7 @@ namespace MassangerMaximka
 
             var tcpPort = GetPortFromEnvOrArgs();
             var discoveryPort = tcpPort - 2;
-            var voicePort = tcpPort - 1;
+            var voicePort = tcpPort + 100;
             builder.Services.AddHexMessengerCore(new NodeConfiguration
             {
                 DisplayName = DeviceInfo.Name,
