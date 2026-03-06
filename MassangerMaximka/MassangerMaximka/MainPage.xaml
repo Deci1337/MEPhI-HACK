@@ -40,10 +40,11 @@
                     <Label x:Name="FileTransferLabel" Grid.Column="2" Text="File: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
                 </Grid>
 
-                <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="5">
-                    <Button Text="Voice Start" Grid.Column="0" Clicked="OnVoiceStartClicked" FontSize="11" Padding="6,4" />
-                    <Button Text="Voice Stop" Grid.Column="1" Clicked="OnVoiceStopClicked" FontSize="11" Padding="6,4" />
-                    <Label x:Name="VoiceStatusLabel" Grid.Column="2" Text="Voice: off" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
+                <Grid ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="5">
+                    <Button x:Name="RecordBtn" Text="Record" Grid.Column="0" Clicked="OnRecordVoiceClicked" FontSize="11" Padding="6,4" BackgroundColor="#C62828" />
+                    <Button Text="Stop &amp; Send" Grid.Column="1" Clicked="OnStopSendVoiceClicked" FontSize="11" Padding="6,4" />
+                    <Button Text="Play" Grid.Column="2" Clicked="OnPlayVoiceClicked" FontSize="11" Padding="6,4" BackgroundColor="#1565C0" />
+                    <Label x:Name="VoiceStatusLabel" Grid.Column="3" Text="Voice: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
                 </Grid>
 
                 <Frame BorderColor="LightGray" Padding="8" HeightRequest="140">
@@ -59,10 +60,11 @@
 
         <!-- Bottom: Technical Logs -->
         <VerticalStackLayout Grid.Row="2" Spacing="5">
-            <Grid ColumnDefinitions="Auto,*,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                 <Label Text="Technical Logs" FontAttributes="Bold" FontSize="14" Grid.Column="0" />
                 <Label x:Name="LogCountLabel" Text="" TextColor="Gray" FontSize="11" Grid.Column="1" VerticalOptions="Center" Margin="10,0,0,0" />
-                <Button x:Name="ClearLogsBtn" Text="Clear" Grid.Column="2" Clicked="OnClearLogsClicked" FontSize="11" Padding="6,2" />
+                <Button Text="Copy" Grid.Column="2" Clicked="OnCopyLogsClicked" FontSize="11" Padding="6,2" BackgroundColor="#37474F" />
+                <Button x:Name="ClearLogsBtn" Text="Clear" Grid.Column="3" Clicked="OnClearLogsClicked" FontSize="11" Padding="6,2" />
             </Grid>
             <Frame BackgroundColor="#1a1a2e" Padding="8" CornerRadius="6">
                 <ScrollView x:Name="TechLogScrollView">

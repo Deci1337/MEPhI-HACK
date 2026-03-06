@@ -74,14 +74,31 @@ public sealed class PeerConnectionService : IDisposable
     {
         if (!_connections.TryGetValue(peerNodeId, out var conn))
             throw new InvalidOperationException($"No connection to peer {peerNodeId}");
-        await EnvelopeSerializer.WriteToStreamAsync(conn.Stream, envelope, ct);
+        await conn.WriteLock.WaitAsync(ct);
+        try
+        {
+            await EnvelopeSerializer.WriteToStreamAsync(conn.Stream, envelope, ct);
+        }
+        finally
+        {
+            conn.WriteLock.Release();
+        }
     }
 
     public async Task BroadcastAsync(TransportEnvelope envelope, CancellationToken ct = default)
     {
-        var tasks = _connections.Values.Select(c =>
-            EnvelopeSerializer.WriteToStreamAsync(c.Stream, envelope, ct));
-        await Task.WhenAll(tasks);
+        foreach (var conn in _connections.Values)
+        {
+            await conn.WriteLock.WaitAsync(ct);
+            try
+            {
+                await EnvelopeSerializer.WriteToStreamAsync(conn.Stream, envelope, ct);
+            }
+            finally
+            {
+                conn.WriteLock.Release();
+            }
+        }
     }
 
     public void DisconnectPeer(string peerNodeId)
@@ -150,8 +167,21 @@ public sealed class PeerConnectionService : IDisposable
                 var envelope = await EnvelopeSerializer.ReadFromStreamAsync(conn.Stream, ct);
                 if (envelope == null) break;
 
-                if (EnvelopeReceived != null)
-                    await EnvelopeReceived.Invoke(conn.PeerNodeId, envelope);
+                var handler = EnvelopeReceived;
+                if (handler != null)
+                {
+                    foreach (var d in handler.GetInvocationList())
+                    {
+                        try
+                        {
+                            await ((Func<string, TransportEnvelope, Task>)d)(conn.PeerNodeId, envelope);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Envelope handler failed for {Type} from {Peer}", envelope.Type, conn.PeerNodeId);
+                        }
+                    }
+                }
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -181,6 +211,7 @@ public sealed class PeerConnection : IDisposable
     public string PeerNodeId { get; }
     public TcpClient Client { get; }
     public NetworkStream Stream { get; }
+    public SemaphoreSlim WriteLock { get; } = new(1, 1);
     public DateTime ConnectedAt { get; } = DateTime.UtcNow;
 
     public PeerConnection(string peerNodeId, TcpClient client)
@@ -194,5 +225,6 @@ public sealed class PeerConnection : IDisposable
     {
         try { Stream.Close(); } catch { }
         try { Client.Close(); } catch { }
+        WriteLock.Dispose();
     }
 }

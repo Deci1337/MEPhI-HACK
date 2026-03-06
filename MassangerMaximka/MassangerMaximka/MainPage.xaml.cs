@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Net;
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using HexTeam.Messenger.Core.Discovery;
 using HexTeam.Messenger.Core.FileTransfer;
@@ -7,6 +8,9 @@ using HexTeam.Messenger.Core.Models;
 using HexTeam.Messenger.Core.Metrics;
 using HexTeam.Messenger.Core.Transport;
 using HexTeam.Messenger.Core.Voice;
+#if WINDOWS
+using System.Runtime.InteropServices;
+#endif
 
 namespace MassangerMaximka
 {
@@ -18,15 +22,23 @@ namespace MassangerMaximka
         private FileTransferService? _files;
         private UdpVoiceTransport? _voice;
         private MetricsService? _metrics;
-        private CancellationTokenSource? _voiceSendCts;
         private readonly HashSet<string> _autoConnectInFlight = [];
         private string? _localNodeId;
         private string? _selectedPeerNodeId;
         private string? _lastTransferId;
+        private string? _lastReceivedVoicePath;
+        private bool _isRecordingVoice;
+        private string? _voiceRecordPath;
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<string> _chatLog = [];
         private int _techLogCount;
         private volatile bool _suppressTechLog;
+
+#if WINDOWS
+        [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
+        private static extern int mciSendStringW(string command, StringBuilder? buffer, int bufSize, IntPtr hwnd);
+        private static int Mci(string cmd) => mciSendStringW(cmd, null, 0, IntPtr.Zero);
+#endif
 
         public MainPage()
         {
@@ -68,11 +80,6 @@ namespace MassangerMaximka
             _chat.DeliveryStatusChanged += OnDeliveryStatusChanged;
             _files.TransferProgressChanged += OnTransferProgressChanged;
             _files.FileReceived += OnFileReceived;
-            if (_voice != null)
-            {
-                _voice.StartListening();
-                _voice.FrameReceived += OnVoiceFrameReceived;
-            }
             if (_metrics != null) _metrics.MetricsUpdated += OnMetricsUpdated;
 
             StatusLabel.Text = $"TCP: {_connections.ListenPort} | NodeId: {config?.NodeId ?? "?"}";
@@ -85,7 +92,7 @@ namespace MassangerMaximka
             TechLog(LogCat.Encryption, $"Envelope serialization: length-prefixed JSON over TCP");
             TechLog(LogCat.Encryption, $"File integrity: SHA256 chunk + full-file hash");
             TechLog(LogCat.Protocol, $"MaxHops={ProtocolConstants.MaxHops}, AckTimeout={ProtocolConstants.AckTimeout.TotalSeconds}s, Retry={ProtocolConstants.MaxRetryCount}, Hash={ProtocolConstants.HashAlgorithm}");
-            if (_voice != null) VoiceStatusLabel.Text = $"Voice: listening on {_voice.LocalPort}";
+            VoiceStatusLabel.Text = "Voice: idle";
 
             RefreshPeersList();
         }
@@ -96,8 +103,6 @@ namespace MassangerMaximka
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
             if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
             if (_files != null) { _files.TransferProgressChanged -= OnTransferProgressChanged; _files.FileReceived -= OnFileReceived; }
-            if (_voice != null) { _voice.FrameReceived -= OnVoiceFrameReceived; _voice.Stop(); }
-            _voiceSendCts?.Cancel();
             if (_metrics != null) _metrics.MetricsUpdated -= OnMetricsUpdated;
             base.OnDisappearing();
         }
@@ -177,9 +182,21 @@ namespace MassangerMaximka
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
-                FileTransferLabel.Text = $"File received: {Path.GetFileName(savedPath)}";
-                AppendChat($"[File Received] {Path.GetFileName(savedPath)}");
+                var fileName = Path.GetFileName(savedPath);
+                FileTransferLabel.Text = $"File received: {fileName}";
                 TechLog(LogCat.Protocol, $"FILE RECV complete id={transferId} path={savedPath}");
+
+                if (fileName.StartsWith("voice_", StringComparison.OrdinalIgnoreCase) &&
+                    fileName.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastReceivedVoicePath = savedPath;
+                    AppendChat($"[Voice Message] {fileName} -- auto-playing...");
+                    PlayVoiceFile(savedPath);
+                }
+                else
+                {
+                    AppendChat($"[File Received] {fileName} -> {savedPath}");
+                }
             });
         }
 
@@ -348,73 +365,147 @@ namespace MassangerMaximka
             }
         }
 
-        private void OnVoiceStartClicked(object? sender, EventArgs e)
+        private void OnRecordVoiceClicked(object? sender, EventArgs e)
         {
-            if (_voice == null || _voiceSendCts != null)
+            if (_isRecordingVoice)
             {
-                AppendChat("[Error] Voice unavailable or already sending");
+                AppendChat("[Error] Already recording");
                 return;
             }
 
-            var toNodeId = GetSelectedOrFirstPeerNodeId();
-            if (string.IsNullOrEmpty(toNodeId))
-            {
-                AppendChat("[Error] Select a peer first for voice");
-                return;
-            }
-
-            if (!TryGetVoiceEndpoint(out var remoteEp))
-            {
-                AppendChat("[Error] Enter peer IP:port first for voice");
-                return;
-            }
+#if WINDOWS
             try
             {
-                _voice.Start(remoteEp);
-                VoiceStatusLabel.Text = $"Voice: sending -> {remoteEp}";
-                TechLog(LogCat.Network, $"Voice started: local={_voice.LocalPort} remote={remoteEp}");
+                var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "VoiceMessages");
+                Directory.CreateDirectory(dir);
+                _voiceRecordPath = Path.Combine(dir, $"voice_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
 
-                _voiceSendCts = new CancellationTokenSource();
-                _ = SendSyntheticVoiceAsync(_voiceSendCts.Token);
+                Mci("close capture");
+                Mci("open new type waveaudio alias capture");
+                var rc = Mci("record capture");
+                if (rc != 0)
+                {
+                    AppendChat($"[Error] Microphone unavailable (mci={rc})");
+                    TechLog(LogCat.System, $"MCI record failed: error {rc}");
+                    return;
+                }
+                _isRecordingVoice = true;
+                RecordBtn.BackgroundColor = Color.FromArgb("#F44336");
+                VoiceStatusLabel.Text = "Voice: RECORDING...";
+                TechLog(LogCat.System, $"Voice recording started -> {_voiceRecordPath}");
             }
             catch (Exception ex)
             {
-                AppendChat($"[Error] Voice start failed: {ex.Message}");
-                TechLog(LogCat.System, $"Voice start failed: {ex.Message}");
+                AppendChat($"[Error] Record failed: {ex.Message}");
+                TechLog(LogCat.System, $"Voice record error: {ex.Message}");
             }
+#else
+            AppendChat("[Info] Voice recording available on Windows only");
+#endif
         }
 
-        private void OnVoiceStopClicked(object? sender, EventArgs e)
+        private async void OnStopSendVoiceClicked(object? sender, EventArgs e)
         {
-            if (_voice == null || _voiceSendCts == null) return;
-
-            _voiceSendCts?.Cancel();
-            _voiceSendCts = null;
-
-            var m = _voice.Metrics;
-            VoiceStatusLabel.Text = $"Voice: listening on {_voice.LocalPort}";
-            AppendChat($"[Voice] Stopped. Sent={m.FramesSent} Recv={m.FramesReceived} Loss={m.PacketLossPercent:F1}%");
-            TechLog(LogCat.Metrics, $"Voice final: sent={m.FramesSent} recv={m.FramesReceived} avgLat={m.AvgLatencyMs:F1}ms jitter={m.JitterMs:F1}ms loss={m.PacketLossPercent:F1}%");
-        }
-
-        private void OnVoiceFrameReceived(byte[] data)
-        {
-            MainThread.BeginInvokeOnMainThread(() =>
+            if (!_isRecordingVoice || _files == null)
             {
-                var m = _voice!.Metrics;
-                VoiceStatusLabel.Text = $"Voice: recv={m.FramesReceived} lat={m.AvgLatencyMs:F0}ms jit={m.JitterMs:F0}ms";
-            });
-        }
-
-        private async Task SendSyntheticVoiceAsync(CancellationToken ct)
-        {
-            var buffer = new byte[960];
-            while (!ct.IsCancellationRequested && _voice != null && _voice.IsActive)
-            {
-                Random.Shared.NextBytes(buffer);
-                await _voice.SendFrameAsync(buffer);
-                await Task.Delay(20, ct);
+                AppendChat("[Error] Not recording or file service unavailable");
+                return;
             }
+
+#if WINDOWS
+            try
+            {
+                Mci("stop capture");
+                Mci($"save capture \"{_voiceRecordPath}\"");
+                Mci("close capture");
+                _isRecordingVoice = false;
+                RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
+
+                if (_voiceRecordPath == null || !File.Exists(_voiceRecordPath) || new FileInfo(_voiceRecordPath).Length <= 44)
+                {
+                    AppendChat("[Error] Recording produced no audio data");
+                    VoiceStatusLabel.Text = "Voice: idle";
+                    return;
+                }
+
+                var fi = new FileInfo(_voiceRecordPath);
+                VoiceStatusLabel.Text = $"Voice: sending {fi.Length / 1024}KB...";
+                TechLog(LogCat.Transport, $"Voice message saved: {fi.Length} bytes");
+
+                var toNodeId = GetSelectedOrFirstPeerNodeId();
+                if (string.IsNullOrEmpty(toNodeId))
+                {
+                    AppendChat("[Error] Select a peer to send voice message");
+                    VoiceStatusLabel.Text = "Voice: idle";
+                    return;
+                }
+
+                var transfer = await _files.SendFileAsync(toNodeId, _voiceRecordPath);
+                _lastTransferId = transfer.TransferId;
+                AppendChat($"[Voice] Sent voice message to {toNodeId}");
+                VoiceStatusLabel.Text = "Voice: sent";
+                TechLog(LogCat.Protocol, $"VOICE SENT id={transfer.TransferId}");
+            }
+            catch (Exception ex)
+            {
+                AppendChat($"[Error] Voice send failed: {ex.Message}");
+                TechLog(LogCat.System, $"Voice send error: {ex.Message}");
+                VoiceStatusLabel.Text = "Voice: idle";
+            }
+#else
+            AppendChat("[Info] Voice available on Windows only");
+            await Task.CompletedTask;
+#endif
+        }
+
+        private void OnPlayVoiceClicked(object? sender, EventArgs e)
+        {
+            var path = _lastReceivedVoicePath;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                AppendChat("[Error] No voice message to play");
+                return;
+            }
+            PlayVoiceFile(path);
+        }
+
+        private void PlayVoiceFile(string path)
+        {
+#if WINDOWS
+            try
+            {
+                Mci("close playback");
+                var rc = Mci($"open \"{path}\" type waveaudio alias playback");
+                if (rc != 0)
+                {
+                    TechLog(LogCat.System, $"MCI open for playback failed: {rc}, falling back to shell");
+                    _ = Launcher.OpenAsync(new OpenFileRequest("Voice", new ReadOnlyFile(path)));
+                    return;
+                }
+                Mci("play playback");
+                VoiceStatusLabel.Text = $"Voice: playing {Path.GetFileName(path)}";
+                TechLog(LogCat.System, $"Playing voice: {path}");
+            }
+            catch (Exception ex)
+            {
+                TechLog(LogCat.System, $"Voice play error: {ex.Message}");
+                _ = Launcher.OpenAsync(new OpenFileRequest("Voice", new ReadOnlyFile(path)));
+            }
+#else
+            _ = Launcher.OpenAsync(new OpenFileRequest("Voice", new ReadOnlyFile(path)));
+#endif
+        }
+
+        private async void OnCopyLogsClicked(object? sender, EventArgs e)
+        {
+            var sb = new StringBuilder();
+            foreach (var child in TechLogStack.Children)
+            {
+                if (child is Label label)
+                    sb.AppendLine(label.Text);
+            }
+            await Clipboard.SetTextAsync(sb.ToString());
+            TechLog(LogCat.System, $"Logs copied to clipboard ({_techLogCount} entries)");
         }
 
         private void OnClearLogsClicked(object? sender, EventArgs e)
@@ -514,25 +605,6 @@ namespace MassangerMaximka
                 return _selectedPeerNodeId;
 
             return _peers.Count > 0 ? ExtractNodeId(_peers[0]) : null;
-        }
-
-        private bool TryGetVoiceEndpoint(out IPEndPoint endPoint)
-        {
-            if (ParseEndpoint(ManualIpEntry.Text?.Trim() ?? "", out var ip, out var tcpPort))
-            {
-                endPoint = new IPEndPoint(ip, tcpPort + 100);
-                return true;
-            }
-
-            if (_connections != null)
-            {
-                var otherTcpPort = _connections.ListenPort == 45680 ? 45681 : 45680;
-                endPoint = new IPEndPoint(IPAddress.Loopback, otherTcpPort + 100);
-                return true;
-            }
-
-            endPoint = new IPEndPoint(IPAddress.Loopback, 45780);
-            return false;
         }
 
         private async Task TryAutoConnectPeerAsync(PeerInfo peer)
