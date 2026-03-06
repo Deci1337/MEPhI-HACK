@@ -3,6 +3,7 @@ using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using HexTeam.Messenger.Core.Discovery;
 using HexTeam.Messenger.Core.Models;
+using HexTeam.Messenger.Core.Metrics;
 using HexTeam.Messenger.Core.Transport;
 
 namespace MassangerMaximka
@@ -12,9 +13,11 @@ namespace MassangerMaximka
         private UdpDiscoveryService? _discovery;
         private PeerConnectionService? _connections;
         private TcpChatTransport? _chat;
+        private MetricsService? _metrics;
         private string? _selectedPeerNodeId;
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<string> _chatLog = [];
+        private int _techLogCount;
 
         public MainPage()
         {
@@ -31,6 +34,8 @@ namespace MassangerMaximka
             _discovery = services.GetService<UdpDiscoveryService>();
             _connections = services.GetService<PeerConnectionService>();
             _chat = services.GetService<TcpChatTransport>();
+            _metrics = services.GetService<MetricsService>();
+            var config = services.GetService<NodeConfiguration>();
 
             if (_discovery == null || _connections == null || _chat == null)
             {
@@ -40,27 +45,41 @@ namespace MassangerMaximka
 
             _discovery.Start();
             _connections.StartListening();
-            services.GetService<HexTeam.Messenger.Core.Metrics.MetricsService>()?.Start();
+            _metrics?.Start();
 
             _discovery.PeerDiscovered += OnPeerDiscovered;
+            _discovery.PeerLost += OnPeerLost;
             _connections.PeerConnected += OnPeerConnected;
             _connections.PeerDisconnected += OnPeerDisconnected;
+            _connections.EnvelopeReceived += OnEnvelopeReceivedLog;
             _chat.MessageReceived += OnMessageReceived;
+            _chat.DeliveryStatusChanged += OnDeliveryStatusChanged;
+            if (_metrics != null) _metrics.MetricsUpdated += OnMetricsUpdated;
 
-            StatusLabel.Text = $"TCP: {_connections.ListenPort} | Peers: {_discovery.Peers.Count}";
+            StatusLabel.Text = $"TCP: {_connections.ListenPort} | NodeId: {config?.NodeId ?? "?"}";
             var otherPort = _connections.ListenPort == 45680 ? 45681 : 45680;
-            PortHintLabel.Text = $"Your port: {_connections.ListenPort}. Connect to other: 127.0.0.1:{otherPort}";
+            PortHintLabel.Text = $"Connect to other instance: 127.0.0.1:{otherPort}";
+
+            TechLog(LogCat.System, $"Node started: {config?.NodeId}");
+            TechLog(LogCat.Network, $"TCP listening on port {_connections.ListenPort}");
+            TechLog(LogCat.Discovery, $"UDP discovery on port {config?.DiscoveryPort}");
+            TechLog(LogCat.Encryption, $"Envelope serialization: length-prefixed JSON over TCP");
+            TechLog(LogCat.Encryption, $"File integrity: SHA256 chunk + full-file hash");
+            TechLog(LogCat.Protocol, $"MaxHops={ProtocolConstants.MaxHops}, AckTimeout={ProtocolConstants.AckTimeout.TotalSeconds}s, Retry={ProtocolConstants.MaxRetryCount}, Hash={ProtocolConstants.HashAlgorithm}");
+
             RefreshPeersList();
         }
 
         protected override void OnDisappearing()
         {
-            if (_discovery != null) _discovery.PeerDiscovered -= OnPeerDiscovered;
-            if (_connections != null) _connections.PeerConnected -= OnPeerConnected;
-            if (_connections != null) _connections.PeerDisconnected -= OnPeerDisconnected;
-            if (_chat != null) _chat.MessageReceived -= OnMessageReceived;
+            if (_discovery != null) { _discovery.PeerDiscovered -= OnPeerDiscovered; _discovery.PeerLost -= OnPeerLost; }
+            if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
+            if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
+            if (_metrics != null) _metrics.MetricsUpdated -= OnMetricsUpdated;
             base.OnDisappearing();
         }
+
+        // --- Events ---
 
         private void OnPeerDiscovered(PeerInfo peer)
         {
@@ -68,6 +87,16 @@ namespace MassangerMaximka
             {
                 RefreshPeersList();
                 StatusLabel.Text = $"TCP: {_connections?.ListenPort ?? 0} | Peers: {_peers.Count}";
+                TechLog(LogCat.Discovery, $"Peer discovered: {peer.DisplayName} ({peer.NodeId}) at {peer.EndPoint}");
+            });
+        }
+
+        private void OnPeerLost(string nodeId)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                RefreshPeersList();
+                TechLog(LogCat.Discovery, $"Peer lost: {nodeId}");
             });
         }
 
@@ -76,7 +105,9 @@ namespace MassangerMaximka
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 RefreshPeersList();
-                AppendLog($"[Connected] {nodeId}");
+                AppendChat($"[Connected] {nodeId}");
+                TechLog(LogCat.Network, $"TCP connected: {nodeId}");
+                TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
             });
         }
 
@@ -85,26 +116,56 @@ namespace MassangerMaximka
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 RefreshPeersList();
-                AppendLog($"[Disconnected] {nodeId}");
+                AppendChat($"[Disconnected] {nodeId}");
+                TechLog(LogCat.Network, $"TCP disconnected: {nodeId}");
             });
         }
 
-        private void OnMessageReceived(ChatMessage msg)
+        private void OnMessageReceived(TransportChatMessage msg)
         {
             MainThread.BeginInvokeOnMainThread(() =>
-                AppendLog($"{msg.FromNodeId}: {msg.Text}"));
+            {
+                AppendChat($"{msg.FromNodeId}: {msg.Text}");
+                TechLog(LogCat.Protocol, $"RECV ChatPacket id={msg.MessageId} from={msg.FromNodeId}");
+                TechLog(LogCat.Encryption, $"Payload deserialized: {msg.Text.Length} chars, ts={msg.TimestampUtc}");
+            });
         }
+
+        private void OnDeliveryStatusChanged(string messageId, DeliveryStatus status)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+                TechLog(LogCat.Protocol, $"Delivery {messageId}: {status}"));
+        }
+
+        private Task OnEnvelopeReceivedLog(string fromPeer, TransportEnvelope env)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                TechLog(LogCat.Transport, $"RECV {env.Type} id={env.PacketId} from={fromPeer} hop={env.HopCount}/{env.MaxHops} payload={env.Payload.Length}B");
+                if (env.Type == TransportPacketType.Ack)
+                    TechLog(LogCat.Protocol, $"ACK received for packet from {fromPeer}");
+            });
+            return Task.CompletedTask;
+        }
+
+        private void OnMetricsUpdated(ConnectionMetrics m)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+                TechLog(LogCat.Metrics, $"RTT={m.RttMs:F1}ms loss={m.PacketLossPercent:F1}% throughput={m.ThroughputBytesPerSec / 1024:F1}KB/s retries={m.RetryCount} peer={m.PeerNodeId}"));
+        }
+
+        // --- Peers ---
 
         private void RefreshPeersList()
         {
             _peers.Clear();
             var seen = new HashSet<string>();
             if (_discovery != null)
-                foreach (var p in _discovery.Peers.Values)
+                foreach (var kv in _discovery.Peers)
                 {
-                    seen.Add(p.NodeId);
-                    var conn = _connections?.IsConnected(p.NodeId) == true ? " [OK]" : "";
-                    _peers.Add($"{p.DisplayName} ({p.NodeId}){conn}");
+                    seen.Add(kv.Key);
+                    var conn = _connections?.IsConnected(kv.Key) == true ? " [OK]" : "";
+                    _peers.Add($"{kv.Value.DisplayName} ({kv.Key}){conn}");
                 }
             if (_connections != null)
                 foreach (var nodeId in _connections.Connections.Keys)
@@ -121,28 +182,27 @@ namespace MassangerMaximka
             if (e.CurrentSelection.FirstOrDefault() is not string s) return;
             var start = s.IndexOf('(') + 1;
             var end = s.IndexOf(')');
-            if (start > 0 && end > start)
-                _selectedPeerNodeId = s[start..end];
-            else
-                _selectedPeerNodeId = null;
-            SelectedPeerLabel.Text = _selectedPeerNodeId ?? "(none)";
+            _selectedPeerNodeId = start > 0 && end > start ? s[start..end] : null;
+            SelectedPeerLabel.Text = $"Selected: {_selectedPeerNodeId ?? "(none)"}";
         }
+
+        // --- Actions ---
 
         private async void OnConnectClicked(object? sender, EventArgs e)
         {
             var input = ManualIpEntry.Text?.Trim();
             if (string.IsNullOrEmpty(input) || _connections == null || _discovery == null) return;
-
             if (!ParseEndpoint(input, out var ip, out var port))
             {
-                AppendLog("[Error] Invalid IP:port format");
+                AppendChat("[Error] Invalid IP:port");
                 return;
             }
-
             var nodeId = $"manual-{ip}:{port}";
-            var peer = _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
-            var ok = await _connections.ConnectToPeerAsync(nodeId, peer.EndPoint);
-            AppendLog(ok ? $"[Connected] {nodeId}" : $"[Failed] {nodeId}");
+            _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
+            TechLog(LogCat.Network, $"Connecting to {ip}:{port}...");
+            var ok = await _connections.ConnectToPeerAsync(nodeId, new IPEndPoint(ip, port));
+            AppendChat(ok ? $"[Connected] {nodeId}" : $"[Failed] {nodeId}");
+            if (ok) TechLog(LogCat.Encryption, $"TCP session established with {nodeId}");
             RefreshPeersList();
         }
 
@@ -150,52 +210,102 @@ namespace MassangerMaximka
         {
             var text = MessageEntry.Text?.Trim();
             if (string.IsNullOrEmpty(text) || _chat == null) return;
-
             var toNodeId = _selectedPeerNodeId;
             if (string.IsNullOrEmpty(toNodeId))
             {
-                if (_peers.Count == 0)
-                {
-                    AppendLog("[Error] No peer selected and no peers available");
-                    return;
-                }
-                toNodeId = ExtractNodeId(_peers[0]);
+                toNodeId = _peers.Count > 0 ? ExtractNodeId(_peers[0]) : null;
             }
-
             if (string.IsNullOrEmpty(toNodeId))
             {
-                AppendLog("[Error] Select a peer first");
+                AppendChat("[Error] Select a peer first");
                 return;
             }
-
             MessageEntry.Text = "";
-            await _chat.SendMessageAsync(toNodeId, text);
-            AppendLog($"Me -> {toNodeId}: {text}");
+            TechLog(LogCat.Transport, $"SEND ChatPacket to={toNodeId} len={text.Length}");
+            TechLog(LogCat.Encryption, $"Serializing envelope: JSON + length-prefix (4B header)");
+            var msg = await _chat.SendMessageAsync(toNodeId, text);
+            AppendChat($"Me -> {toNodeId}: {text}");
+            TechLog(LogCat.Protocol, $"SENT id={msg.MessageId} status={msg.Status}");
         }
 
-        private static bool ParseEndpoint(string input, out IPAddress ip, out int port)
+        private void OnClearLogsClicked(object? sender, EventArgs e)
         {
-            ip = IPAddress.Loopback;
-            port = 45680;
-            var parts = input.Split(':');
-            if (parts.Length != 2) return false;
-            if (!IPAddress.TryParse(parts[0], out ip!)) return false;
-            if (!int.TryParse(parts[1], out port)) return false;
-            return true;
+            TechLogStack.Children.Clear();
+            _techLogCount = 0;
+            LogCountLabel.Text = "";
         }
 
-        private static string? ExtractNodeId(string display)
-        {
-            var start = display.IndexOf('(') + 1;
-            var end = display.IndexOf(')');
-            return start > 0 && end > start ? display[start..end] : null;
-        }
+        // --- Logging ---
 
-        private void AppendLog(string line)
+        private void AppendChat(string line)
         {
             _chatLog.Add($"{DateTime.Now:HH:mm:ss} {line}");
             while (_chatLog.Count > 50) _chatLog.RemoveAt(0);
             ChatLogLabel.Text = string.Join("\n", _chatLog);
         }
+
+        private void TechLog(LogCat cat, string text)
+        {
+            var color = cat switch
+            {
+                LogCat.Encryption => Color.FromArgb("#00C853"),   // bright green
+                LogCat.Network    => Color.FromArgb("#29B6F6"),   // light blue
+                LogCat.Transport  => Color.FromArgb("#FFB300"),   // amber
+                LogCat.Protocol   => Color.FromArgb("#CE93D8"),   // light purple
+                LogCat.Discovery  => Color.FromArgb("#4DD0E1"),   // cyan
+                LogCat.Metrics    => Color.FromArgb("#FF8A65"),   // orange
+                LogCat.System     => Color.FromArgb("#BDBDBD"),   // gray
+                LogCat.Relay      => Color.FromArgb("#F06292"),   // pink
+                _ => Colors.White
+            };
+
+            var prefix = cat switch
+            {
+                LogCat.Encryption => "[ENC]",
+                LogCat.Network    => "[NET]",
+                LogCat.Transport  => "[TRN]",
+                LogCat.Protocol   => "[PRT]",
+                LogCat.Discovery  => "[DSC]",
+                LogCat.Metrics    => "[MET]",
+                LogCat.System     => "[SYS]",
+                LogCat.Relay      => "[RLY]",
+                _ => "[???]"
+            };
+
+            var label = new Label
+            {
+                Text = $"{DateTime.Now:HH:mm:ss.fff} {prefix} {text}",
+                TextColor = color,
+                FontSize = 11,
+                FontFamily = "OpenSansRegular",
+                LineBreakMode = LineBreakMode.TailTruncation
+            };
+
+            TechLogStack.Children.Add(label);
+            _techLogCount++;
+            while (TechLogStack.Children.Count > 200)
+                TechLogStack.Children.RemoveAt(0);
+            LogCountLabel.Text = $"({_techLogCount} entries)";
+            _ = TechLogScrollView.ScrollToAsync(0, TechLogStack.Height, false);
+        }
+
+        // --- Helpers ---
+
+        private static bool ParseEndpoint(string input, out IPAddress ip, out int port)
+        {
+            ip = IPAddress.Loopback; port = 45680;
+            var parts = input.Split(':');
+            if (parts.Length != 2) return false;
+            return IPAddress.TryParse(parts[0], out ip!) && int.TryParse(parts[1], out port);
+        }
+
+        private static string? ExtractNodeId(string display)
+        {
+            var s = display.IndexOf('(') + 1;
+            var e = display.IndexOf(')');
+            return s > 0 && e > s ? display[s..e] : null;
+        }
+
+        private enum LogCat { System, Network, Transport, Protocol, Discovery, Encryption, Metrics, Relay }
     }
 }

@@ -4,41 +4,58 @@
              x:Class="MassangerMaximka.MainPage"
              Title="Hex P2P Test">
 
-    <ScrollView>
-        <VerticalStackLayout Padding="20" Spacing="15">
-            <Label x:Name="StatusLabel" Text="Starting..." FontAttributes="Bold" />
-            <Label x:Name="PortHintLabel" Text="" TextColor="Gray" FontSize="12" />
-            <Label x:Name="PeersLabel" Text="Peers: 0" />
-            <CollectionView x:Name="PeersList" HeightRequest="120" SelectionMode="Single"
-                            SelectionChanged="OnPeerSelected">
-                <CollectionView.ItemTemplate>
-                    <DataTemplate>
-                        <Label Text="{Binding}" Padding="5" />
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
+    <Grid RowDefinitions="*,Auto,*" Padding="15" RowSpacing="10">
 
-            <Label Text="Manual connect (IP:port, e.g. 127.0.0.1:45680):" />
-            <Grid ColumnDefinitions="*,Auto">
-                <Entry x:Name="ManualIpEntry" Placeholder="192.168.1.10:45680" Grid.Column="0" />
-                <Button x:Name="ConnectBtn" Text="Connect" Grid.Column="1" Clicked="OnConnectClicked" />
+        <!-- Top: Chat UI -->
+        <ScrollView Grid.Row="0">
+            <VerticalStackLayout Spacing="10">
+                <Label x:Name="StatusLabel" Text="Starting..." FontAttributes="Bold" FontSize="16" />
+                <Label x:Name="PortHintLabel" Text="" TextColor="Gray" FontSize="11" />
+                <Label x:Name="PeersLabel" Text="Peers: 0" FontSize="13" />
+                <CollectionView x:Name="PeersList" HeightRequest="80" SelectionMode="Single"
+                                SelectionChanged="OnPeerSelected">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate>
+                            <Label Text="{Binding}" Padding="4" FontSize="12" />
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5">
+                    <Entry x:Name="ManualIpEntry" Placeholder="IP:port (e.g. 127.0.0.1:45680)" Grid.Column="0" FontSize="13" />
+                    <Button Text="Connect" Grid.Column="1" Clicked="OnConnectClicked" FontSize="12" Padding="8,4" />
+                </Grid>
+
+                <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="Gray" FontSize="12" />
+
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5">
+                    <Entry x:Name="MessageEntry" Placeholder="Type message..." Grid.Column="0" FontSize="13" />
+                    <Button Text="Send" Grid.Column="1" Clicked="OnSendClicked" FontSize="12" Padding="8,4" />
+                </Grid>
+
+                <Frame BorderColor="LightGray" Padding="8" HeightRequest="140">
+                    <ScrollView x:Name="ChatScrollView">
+                        <Label x:Name="ChatLogLabel" Text="" LineBreakMode="WordWrap" FontSize="12" />
+                    </ScrollView>
+                </Frame>
+            </VerticalStackLayout>
+        </ScrollView>
+
+        <!-- Divider -->
+        <BoxView Grid.Row="1" HeightRequest="2" Color="DarkGray" />
+
+        <!-- Bottom: Technical Logs -->
+        <VerticalStackLayout Grid.Row="2" Spacing="5">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <Label Text="Technical Logs" FontAttributes="Bold" FontSize="14" Grid.Column="0" />
+                <Label x:Name="LogCountLabel" Text="" TextColor="Gray" FontSize="11" Grid.Column="1" VerticalOptions="Center" Margin="10,0,0,0" />
+                <Button x:Name="ClearLogsBtn" Text="Clear" Grid.Column="2" Clicked="OnClearLogsClicked" FontSize="11" Padding="6,2" />
             </Grid>
-
-            <Label Text="Selected peer:" />
-            <Label x:Name="SelectedPeerLabel" Text="(none)" TextColor="Gray" />
-
-            <Label Text="Message:" />
-            <Grid ColumnDefinitions="*,Auto">
-                <Entry x:Name="MessageEntry" Placeholder="Type message..." Grid.Column="0" />
-                <Button x:Name="SendBtn" Text="Send" Grid.Column="1" Clicked="OnSendClicked" />
-            </Grid>
-
-            <Label Text="Chat log:" FontAttributes="Bold" />
-            <Frame BorderColor="LightGray" Padding="10" HeightRequest="200">
-                <ScrollView>
-                    <Label x:Name="ChatLogLabel" Text="" LineBreakMode="WordWrap" />
+            <Frame BackgroundColor="#1a1a2e" Padding="8" CornerRadius="6">
+                <ScrollView x:Name="TechLogScrollView">
+                    <VerticalStackLayout x:Name="TechLogStack" Spacing="1" />
                 </ScrollView>
             </Frame>
         </VerticalStackLayout>
-    </ScrollView>
+    </Grid>
 </ContentPage>
