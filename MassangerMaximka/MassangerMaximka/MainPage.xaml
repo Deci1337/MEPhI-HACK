@@ -31,7 +31,7 @@
                     <Button Text="Forget Saved" Grid.Column="2" Clicked="OnForgetSavedPeersClicked" FontSize="11" Padding="8,4" BackgroundColor="#6D4C41" />
                 </Grid>
 
-                <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="Gray" FontSize="12" />
+                <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="" FontSize="12" />
 
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
                     <Entry x:Name="MessageEntry" Placeholder="Type message..." Grid.Column="0" FontSize="13" />
@@ -45,11 +45,12 @@
                     <Label x:Name="FileTransferLabel" Grid.Column="2" Text="File: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
                 </Grid>
 
-                <Grid ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="5">
+                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="5">
                     <Button x:Name="RecordBtn" Text="Record" Grid.Column="0" Clicked="OnRecordVoiceClicked" FontSize="11" Padding="6,4" BackgroundColor="#C62828" />
                     <Button Text="Stop &amp; Send" Grid.Column="1" Clicked="OnStopSendVoiceClicked" FontSize="11" Padding="6,4" />
                     <Button Text="Play" Grid.Column="2" Clicked="OnPlayVoiceClicked" FontSize="11" Padding="6,4" BackgroundColor="#1565C0" />
-                    <Label x:Name="VoiceStatusLabel" Grid.Column="3" Text="Voice: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
+                    <Button x:Name="CallBtn" Text="Call" Grid.Column="3" Clicked="OnCallButtonClicked" FontSize="11" Padding="6,4" BackgroundColor="#2E7D32" />
+                    <Label x:Name="VoiceStatusLabel" Grid.Column="4" Text="Voice: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
                 </Grid>
 
                 <Frame BorderColor="LightGray" Padding="8" HeightRequest="140">
