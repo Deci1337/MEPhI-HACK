@@ -207,11 +207,13 @@ public sealed class FileTransferService
             if (!Directory.Exists(_receiveDir))
                 Directory.CreateDirectory(_receiveDir);
 
-            using var fs = File.Create(ctx.SavePath);
-            foreach (var chunk in ctx.ReceivedChunks)
+            await using (var fs = File.Create(ctx.SavePath))
             {
-                if (chunk != null)
-                    await fs.WriteAsync(chunk);
+                foreach (var chunk in ctx.ReceivedChunks)
+                {
+                    if (chunk != null)
+                        await fs.WriteAsync(chunk);
+                }
             }
 
             var savedHash = await FileIntegrityService.ComputeFileHashAsync(ctx.SavePath);
