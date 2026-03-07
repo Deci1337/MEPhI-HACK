@@ -1,594 +1,95 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:local="clr-namespace:MassangerMaximka"
-             xmlns:conv="clr-namespace:MassangerMaximka.Converters"
              x:Class="MassangerMaximka.MainPage"
-             Title="ETHERнет"
-             BackgroundColor="{StaticResource Coal}">
+             Title="Hex P2P Test">
 
-    <ContentPage.Resources>
-        <ResourceDictionary>
-            <conv:ByteArrayToImageSourceConverter x:Key="ByteArrayToImageSourceConverter" />
-            <conv:StringToAvatarBrushConverter x:Key="StringToAvatarBrushConverter" />
-            <conv:PeerNameConverter x:Key="PeerNameConverter" />
-            <conv:PeerStatusConverter x:Key="PeerStatusConverter" />
-            
-            <Style TargetType="Label">
-                <Setter Property="TextColor" Value="White" />
-                <Setter Property="BackgroundColor" Value="Transparent" />
-            </Style>
-            <Style TargetType="Button">
-                <Setter Property="TextColor" Value="White" />
-            </Style>
-            <Style TargetType="Entry">
-                <Setter Property="TextColor" Value="White" />
-            </Style>
-        </ResourceDictionary>
-    </ContentPage.Resources>
+    <Grid RowDefinitions="*,Auto,*" Padding="15" RowSpacing="10">
 
-    <Grid x:Name="RootLayout" ColumnSpacing="0" RowSpacing="0">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="{OnIdiom Phone=0, Default=280}" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="{OnIdiom Phone=0, Default=320}" />
-        </Grid.ColumnDefinitions>
+        <!-- Top: Chat UI -->
+        <ScrollView Grid.Row="0">
+            <VerticalStackLayout Spacing="10">
+                <Label x:Name="StatusLabel" Text="Starting..." FontAttributes="Bold" FontSize="16" />
+                <Label x:Name="PortHintLabel" Text="" TextColor="Gray" FontSize="11" />
+                <Label x:Name="PeersLabel" Text="Peers: 0" FontSize="13" />
+                <CollectionView x:Name="PeersList" HeightRequest="80" SelectionMode="Single"
+                                SelectionChanged="OnPeerSelected">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                            <Label Text="{Binding}" Padding="4" FontSize="12">
+                                <Label.GestureRecognizers>
+                                    <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
+                                </Label.GestureRecognizers>
+                            </Label>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
 
-        <!-- ====== LEFT: Peers sidebar ====== -->
-        <Grid x:Name="SidebarPanel" Grid.Column="0" 
-              BackgroundColor="{StaticResource CoalPanel}"
-              RowDefinitions="Auto,Auto,*,Auto" RowSpacing="0">
-
-            <!-- App header -->
-            <Grid Grid.Row="0" Padding="20,24,20,16" ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                <!-- Device avatar icon -->
-                <Border Grid.Column="0"
-                        BackgroundColor="#1A1A1A"
-                        StrokeThickness="1" Stroke="#333333"
-                        HeightRequest="40" WidthRequest="40"
-                        VerticalOptions="Center">
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="10" />
-                    </Border.StrokeShape>
-                    <!-- Simple laptop/device icon -->
-                    <Path Data="M4 6h16v10H4V6zm-1 11h18l1 2H3l1-2zm5-8h6v1H8V9zm0 2h6v1H8v-1z"
-                          Fill="White" HorizontalOptions="Center" VerticalOptions="Center"
-                          WidthRequest="22" HeightRequest="22" Aspect="Uniform" />
-                </Border>
-                <StackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                    <Label x:Name="DeviceNameLabel"
-                           Text="This device"
-                           FontFamily="OpenSansSemibold" FontSize="15" FontAttributes="Bold"
-                           TextColor="White"
-                           LineBreakMode="TailTruncation" />
-                    <Label x:Name="StatusLabel" Text="Starting..." FontSize="11"
-                           TextColor="{StaticResource SeaShellMuted}" />
-                </StackLayout>
-            </Grid>
-            <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
-
-            <!-- Peers section header -->
-            <Grid Grid.Row="1" Padding="20,16,20,8" ColumnDefinitions="*,Auto">
-                <Label Grid.Column="0" x:Name="PeersLabel" Text="DEVICES"
-                       FontSize="11" FontAttributes="Bold" TextColor="{StaticResource SeaShellMuted}"
-                       CharacterSpacing="1.2" VerticalOptions="Center" />
-                <Label Grid.Column="1" x:Name="PortHintLabel" Text=""
-                       FontSize="10" TextColor="{StaticResource SeaShellMuted}" VerticalOptions="Center" />
-            </Grid>
-
-            <!-- Peers list -->
-            <CollectionView Grid.Row="2" x:Name="PeersList" SelectionMode="Single"
-                            SelectionChanged="OnPeerSelected">
-                <CollectionView.ItemTemplate>
-                    <DataTemplate>
-                        <Grid Padding="8,3" MinimumHeightRequest="{OnIdiom Phone=56, Default=50}">
-                            <Grid.GestureRecognizers>
-                                <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
-                            </Grid.GestureRecognizers>
-                            <Grid ColumnDefinitions="44,*" ColumnSpacing="10"
-                                  BackgroundColor="#141414" Padding="10,8">
-                                <Border Grid.Column="0" WidthRequest="36" HeightRequest="36"
-                                        Background="{Binding ., Converter={StaticResource StringToAvatarBrushConverter}}"
-                                        StrokeThickness="0" VerticalOptions="Center">
-                                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                                </Border>
-                                <Label Grid.Column="1"
-                                       Text="{Binding .}"
-                                       FontFamily="OpenSansRegular"
-                                       FontSize="13" FontAttributes="Bold"
-                                       TextColor="White"
-                                       BackgroundColor="Transparent"
-                                       LineBreakMode="TailTruncation"
-                                       VerticalOptions="Center" />
-                            </Grid>
-                        </Grid>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
-
-            <!-- Connect + actions section -->
-            <StackLayout Grid.Row="3" Padding="16,12,16,20" Spacing="8">
-                <BoxView HeightRequest="1" Color="{StaticResource CoalBorder}" />
-                <Border BackgroundColor="{StaticResource CoalInput}"
-                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}"
-                        Padding="12,0">
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="6" />
-                    </Border.StrokeShape>
-                    <Entry x:Name="ManualIpEntry" Placeholder="192.168.1.x:45680"
-                           FontSize="{OnIdiom Phone=12, Default=13}"
-                           BackgroundColor="Transparent"
-                           TextColor="White"
-                           PlaceholderColor="{StaticResource SeaShellMuted}" />
-                </Border>
-                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                    <Button Grid.Column="0" Text="CONNECT" Clicked="OnConnectClicked"
-                            BackgroundColor="White"
-                            TextColor="Black" FontAttributes="Bold"
-                            FontSize="11" Padding="0,10" CornerRadius="6" />
-                    <Button Grid.Column="1" Text="FORGET" Clicked="OnForgetSavedPeersClicked"
-                            BackgroundColor="Transparent"
-                            BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                            TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold"
-                            FontSize="11" Padding="0,10" CornerRadius="6" />
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
+                    <Entry x:Name="ManualIpEntry" Placeholder="IP:port (e.g. 127.0.0.1:45680)" Grid.Column="0" FontSize="13" />
+                    <Button Text="Connect" Grid.Column="1" Clicked="OnConnectClicked" FontSize="12" Padding="8,4" />
+                    <Button Text="Forget Saved" Grid.Column="2" Clicked="OnForgetSavedPeersClicked" FontSize="11" Padding="8,4" BackgroundColor="#6D4C41" />
                 </Grid>
-                <Button Text="+ NEW CHANNEL" Clicked="OnCreateChannelClicked"
-                        BackgroundColor="Transparent"
-                        BorderColor="White" BorderWidth="1"
-                        TextColor="White" FontAttributes="Bold"
-                        FontSize="11" Padding="0,10" CornerRadius="6" />
-            </StackLayout>
-        </Grid>
 
-        <!-- Vertical divider (desktop only) -->
-        <BoxView x:Name="SidebarDivider" Grid.Column="0" 
-                 WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="End" />
+                <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="Gray" FontSize="12" />
 
-        <!-- ====== RIGHT: Chat panel ====== -->
-        <Grid x:Name="ChatPanel" Grid.Column="1" 
-              BackgroundColor="{StaticResource Coal}"
-              RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" RowSpacing="0">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
+                    <Entry x:Name="MessageEntry" Placeholder="Type message..." Grid.Column="0" FontSize="13" />
+                    <Button Text="Send" Grid.Column="1" Clicked="OnSendClicked" FontSize="12" Padding="8,4" />
+                    <Button Text="Clear" Grid.Column="2" Clicked="OnClearChatClicked" FontSize="11" Padding="6,4" BackgroundColor="#555" />
+                </Grid>
 
-            <!-- Chat header -->
-            <Grid Grid.Row="0" Padding="16,12,12,12"
-                  ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto"
-                  ColumnSpacing="10"
-                  BackgroundColor="{StaticResource CoalPanel}">
-                <!-- Mobile back button -->
-                <Button Grid.Column="0" x:Name="BackToPeersBtn" Text="❮"
-                        Clicked="OnBackToPeersClicked"
-                        IsVisible="False"
-                        BackgroundColor="Transparent"
-                        BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="White"
-                        FontSize="18" Padding="12,6" CornerRadius="6"
-                        HeightRequest="40" />
-                <!-- Peer info -->
-                <StackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                    <Label x:Name="SelectedPeerLabel" Text="Select a device"
-                           FontSize="{OnIdiom Phone=15, Default=16}" FontAttributes="Bold"
-                           TextColor="White" />
-                    <Label x:Name="VoiceStatusLabel" Text="Voice: idle"
-                           FontSize="11" TextColor="{StaticResource SeaShellMuted}" />
-                </StackLayout>
-                <!-- Voice record button -->
-                <Grid Grid.Column="2" x:Name="RecordBtn" WidthRequest="44" HeightRequest="40">
-                    <Border x:Name="RecordBtnBg" BackgroundColor="White" StrokeThickness="0">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    </Border>
-                    <Path x:Name="RecordBtnIcon" Data="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z" 
-                          Fill="Black" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
-                    <Button BackgroundColor="Transparent" Clicked="OnRecordVoiceClicked" />
+                <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="5">
+                    <Button Text="Pick File" Grid.Column="0" Clicked="OnSendTestFileClicked" FontSize="11" Padding="6,4" />
+                    <Button Text="Resume" Grid.Column="1" Clicked="OnResumeFileClicked" FontSize="11" Padding="6,4" />
+                    <Label x:Name="FileTransferLabel" Grid.Column="2" Text="File: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
                 </Grid>
-                <!-- Stop button -->
-                <Grid Grid.Column="3" x:Name="StopSendBtn" WidthRequest="44" HeightRequest="40">
-                    <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    </Border>
-                    <Path Data="M6 6h12v12H6z" Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
-                    <Button BackgroundColor="Transparent" Clicked="OnStopSendVoiceClicked" />
-                </Grid>
-                <!-- PTT button -->
-                <Button Grid.Column="4" x:Name="PttBtn" Text="🎤 HOLD TO TALK"
-                        IsVisible="False"
-                        Pressed="OnPttPressed" Released="OnPttReleased"
-                        BackgroundColor="White"
-                        TextColor="Black" FontAttributes="Bold"
-                        FontSize="12" Padding="16,8" CornerRadius="6"
-                        HeightRequest="40" />
-                <!-- Call button -->
-                <Grid Grid.Column="5" WidthRequest="44" HeightRequest="40">
-                    <Border x:Name="CallBtnBg" BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    </Border>
-                    <Path x:Name="CallBtnIcon" Data="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" 
-                          Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
-                    <Button BackgroundColor="Transparent" Clicked="OnCallButtonClicked" />
-                </Grid>
-                <!-- Toggle logs (Desktop only) -->
-                <Button Grid.Column="6" x:Name="ShowLogsBtn"
-                        Text="≡" FontSize="16"
-                        Clicked="OnToggleLogsPanelClicked"
-                        BackgroundColor="Transparent"
-                        BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="{StaticResource SeaShellMuted}"
-                        WidthRequest="44" HeightRequest="40"
-                        Padding="0" CornerRadius="6"
-                        IsVisible="{OnIdiom Phone=False, Default=False}" />
-            </Grid>
-            <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
 
-            <!-- Channel bar -->
-            <Grid Grid.Row="1" x:Name="ChannelBar" IsVisible="False"
-                  BackgroundColor="{StaticResource CoalSurface}" Padding="16,10,12,10"
-                  ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
-                <Label Grid.Column="0" Text="#" FontSize="18" TextColor="White"
-                       VerticalOptions="Center" />
-                <StackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                    <Label x:Name="ChannelInfoLabel" Text="Channel"
-                           TextColor="White" FontSize="13" FontAttributes="Bold" />
-                    <Label x:Name="ChannelPttLabel" IsVisible="False"
-                           TextColor="White" FontSize="11" FontAttributes="Bold" />
-                </StackLayout>
-                <Button Grid.Column="2" Text="+ INVITE" Clicked="OnInviteToChannelClicked"
-                        BackgroundColor="Transparent"
-                        BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="White" FontAttributes="Bold"
-                        FontSize="10" Padding="12,6" CornerRadius="4" />
-                <Button Grid.Column="3" x:Name="LeaveChannelBtn" Text="LEAVE"
-                        Clicked="OnLeaveChannelClicked"
-                        BackgroundColor="White"
-                        TextColor="Black" FontAttributes="Bold"
-                        FontSize="10" Padding="12,6" CornerRadius="4" />
-            </Grid>
+                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="5">
+                    <Button x:Name="RecordBtn" Text="Record" Grid.Column="0" Clicked="OnRecordVoiceClicked" FontSize="11" Padding="6,4" BackgroundColor="#C62828" />
+                    <Button Text="Stop &amp; Send" Grid.Column="1" Clicked="OnStopSendVoiceClicked" FontSize="11" Padding="6,4" />
+                    <Button Text="Play" Grid.Column="2" Clicked="OnPlayVoiceClicked" FontSize="11" Padding="6,4" BackgroundColor="#1565C0" />
+                    <Button x:Name="CallBtn" Text="Call" Grid.Column="3" Clicked="OnCallButtonClicked" FontSize="11" Padding="6,4" BackgroundColor="#2E7D32" />
+                    <Label x:Name="VoiceStatusLabel" Grid.Column="4" Text="Voice: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
+                </Grid>
 
-            <!-- Incoming call banner -->
-            <Border Grid.Row="2" x:Name="IncomingCallBanner" IsVisible="False"
-                    BackgroundColor="{StaticResource CoalSurface}" StrokeThickness="1" Stroke="White" Margin="16,16,16,0">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8" />
-                </Border.StrokeShape>
-                <Grid Padding="16,14,14,14" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
-                    <Label Grid.Column="0" Text="☏" FontSize="24" TextColor="White" VerticalOptions="Center" />
-                    <StackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                        <Label Text="INCOMING CALL" FontSize="10" FontAttributes="Bold" CharacterSpacing="1"
-                               TextColor="{StaticResource SeaShellMuted}" />
-                        <Label x:Name="IncomingCallLabel" Text="Unknown"
-                               FontSize="15" FontAttributes="Bold"
-                               TextColor="White" />
-                    </StackLayout>
-                    <Button Grid.Column="2" Text="ACCEPT" Clicked="OnAcceptCallClicked"
-                            BackgroundColor="White"
-                            TextColor="Black" FontAttributes="Bold" FontSize="11"
-                            Padding="16,8" CornerRadius="6" />
-                    <Button Grid.Column="3" Text="DECLINE" Clicked="OnDeclineCallClicked"
-                            BackgroundColor="Transparent" BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                            TextColor="White" FontAttributes="Bold" FontSize="11"
-                            Padding="16,8" CornerRadius="6" />
-                </Grid>
-            </Border>
-
-            <!-- Chat messages -->
-            <CollectionView Grid.Row="3" x:Name="ChatList" Margin="16,12,16,12">
-                <CollectionView.ItemTemplate>
-                    <DataTemplate x:DataType="local:ChatItem">
-                        <StackLayout Padding="0,4">
-                            <!-- Text bubble -->
-                            <Grid IsVisible="{Binding IsText}" HorizontalOptions="{Binding BubbleAlign}">
-                                <Border BackgroundColor="{Binding BubbleBg}"
-                                        Stroke="{Binding BubbleStrokeColor}"
-                                        StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        MaximumWidthRequest="500"
-                                        Padding="{Binding BubblePadding}">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="14" />
-                                    </Border.StrokeShape>
-                                    <StackLayout Spacing="3">
-                                        <Label Text="{Binding SenderName}"
-                                               IsVisible="{Binding HasSenderName}"
-                                               FontFamily="OpenSansRegular"
-                                               FontSize="10" TextColor="#777777"
-                                               BackgroundColor="Transparent" />
-                                        <Label Text="{Binding Text}"
-                                               FontFamily="OpenSansRegular"
-                                               LineBreakMode="WordWrap"
-                                               FontSize="14" TextColor="White"
-                                               BackgroundColor="Transparent" />
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <Label Grid.Column="0"
-                                                   Text="{Binding Status}"
-                                                   IsVisible="{Binding HasStatus}"
-                                                   FontFamily="OpenSansRegular"
-                                                   FontSize="10" TextColor="#666666"
-                                                   BackgroundColor="Transparent" />
-                                            <Label Grid.Column="1"
-                                                   Text="{Binding TimeSent}"
-                                                   IsVisible="{Binding HasTimeSent}"
-                                                   FontFamily="OpenSansRegular"
-                                                   FontSize="10" TextColor="#666666"
-                                                   BackgroundColor="Transparent" />
-                                        </Grid>
-                                    </StackLayout>
-                                </Border>
-                            </Grid>
-                            <!-- Voice message -->
-                            <Grid IsVisible="{Binding IsVoice}" HorizontalOptions="{Binding BubbleAlign}">
-                                <Border BackgroundColor="{Binding BubbleBg}"
-                                        Stroke="{Binding BubbleStrokeColor}"
-                                        StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        Padding="12,10">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="14" />
-                                    </Border.StrokeShape>
-                                    <StackLayout Spacing="4">
-                                        <Label Text="{Binding SenderName}"
-                                               IsVisible="{Binding HasSenderName}"
-                                               FontFamily="OpenSansRegular"
-                                               FontSize="10" TextColor="#777777"
-                                               BackgroundColor="Transparent" />
-                                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                                            <Button Grid.Column="0" Text="▶"
-                                                    BackgroundColor="Transparent"
-                                                    BorderColor="White" BorderWidth="1"
-                                                    TextColor="White"
-                                                    FontFamily="OpenSansRegular"
-                                                    FontSize="14" Padding="12,6" CornerRadius="6"
-                                                    CommandParameter="{Binding VoicePath}"
-                                                    Clicked="OnVoiceItemPlayClicked" />
-                                            <Label Grid.Column="1" Text="{Binding Text}"
-                                                   FontFamily="OpenSansRegular"
-                                                   FontSize="13" TextColor="White"
-                                                   BackgroundColor="Transparent"
-                                                   VerticalOptions="Center" LineBreakMode="TailTruncation" />
-                                        </Grid>
-                                        <Label Text="{Binding TimeSent}"
-                                               IsVisible="{Binding HasTimeSent}"
-                                               FontFamily="OpenSansRegular"
-                                               FontSize="10" TextColor="#666666"
-                                               BackgroundColor="Transparent"
-                                               HorizontalOptions="End" />
-                                    </StackLayout>
-                                </Border>
-                            </Grid>
-                            <!-- Image message -->
-                            <Grid IsVisible="{Binding IsImage}" HorizontalOptions="{Binding BubbleAlign}">
-                                <Border BackgroundColor="{Binding BubbleBg}"
-                                        Stroke="{Binding BubbleStrokeColor}"
-                                        StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        Padding="8">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="14" />
-                                    </Border.StrokeShape>
-                                    <StackLayout Spacing="6">
-                                        <Label Text="{Binding SenderName}"
-                                               IsVisible="{Binding HasSenderName}"
-                                               FontFamily="OpenSansRegular"
-                                               FontSize="10" TextColor="#777777"
-                                               BackgroundColor="Transparent" />
-                                        <Image Source="{Binding ImageBytes, Converter={StaticResource ByteArrayToImageSourceConverter}}"
-                                               HeightRequest="240" WidthRequest="240"
-                                               Aspect="AspectFill" />
-                                        <Label Text="{Binding TimeSent}"
-                                               IsVisible="{Binding HasTimeSent}"
-                                               FontFamily="OpenSansRegular"
-                                               FontSize="10" TextColor="#666666"
-                                               BackgroundColor="Transparent"
-                                               HorizontalOptions="End" />
-                                    </StackLayout>
-                                </Border>
-                            </Grid>
-                        </StackLayout>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
-
-            <!-- Message input bar (wide/desktop) -->
-            <Grid x:Name="MessageBarWide" Grid.Row="4" Padding="16,12,16,12"
-                  ColumnDefinitions="Auto,Auto,*,Auto,Auto"
-                  ColumnSpacing="8" BackgroundColor="{StaticResource CoalPanel}">
-                <BoxView Grid.ColumnSpan="5" HeightRequest="1"
-                         Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
-                <Grid Grid.Column="0" WidthRequest="44" HeightRequest="42">
-                    <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    </Border>
-                    <Path Data="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z" 
-                          Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
-                    <Button BackgroundColor="Transparent" Clicked="OnSendTestFileClicked" />
-                </Grid>
-                <Grid Grid.Column="1" WidthRequest="44" HeightRequest="42">
-                    <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    </Border>
-                    <Path Data="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" 
-                          Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
-                    <Button BackgroundColor="Transparent" Clicked="OnSendPhotoClicked" />
-                </Grid>
-                <Border Grid.Column="2"
-                        BackgroundColor="{StaticResource CoalInput}"
-                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}"
-                        Padding="12,0">
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="6" />
-                    </Border.StrokeShape>
-                    <Entry x:Name="MessageEntry" Placeholder="Type a message..."
-                           BackgroundColor="Transparent"
-                           TextColor="White"
-                           PlaceholderColor="{StaticResource SeaShellMuted}"
-                           FontSize="{OnIdiom Phone=14, Default=14}"
-                           Completed="OnSendClicked" />
-                </Border>
-                <Grid Grid.Column="3" WidthRequest="44" HeightRequest="42">
-                    <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    </Border>
-                    <Path Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" 
-                          Fill="{StaticResource SeaShellMuted}" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
-                    <Button BackgroundColor="Transparent" Clicked="OnClearChatClicked" />
-                </Grid>
-                <Grid Grid.Column="4" WidthRequest="54" HeightRequest="42">
-                    <Border BackgroundColor="White" StrokeThickness="0">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    </Border>
-                    <Path Data="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" 
-                          Fill="Black" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" Margin="4,0,0,0" />
-                    <Button BackgroundColor="Transparent" Clicked="OnSendClicked" />
-                </Grid>
-            </Grid>
-
-            <!-- Message input bar (narrow/mobile) -->
-            <VerticalStackLayout x:Name="MessageBarNarrow" Grid.Row="4" IsVisible="False"
-                                 Padding="12,10" Spacing="10"
-                                 BackgroundColor="{StaticResource CoalPanel}">
-                <BoxView HeightRequest="1" Color="{StaticResource CoalBorder}" />
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                    <Border Grid.Column="0"
-                            BackgroundColor="{StaticResource CoalInput}"
-                            StrokeThickness="1" Stroke="{StaticResource CoalBorder}"
-                            Padding="12,0">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="6" />
-                        </Border.StrokeShape>
-                        <Entry x:Name="MessageEntryNarrow" Placeholder="Message..."
-                               BackgroundColor="Transparent"
-                               TextColor="White"
-                               PlaceholderColor="{StaticResource SeaShellMuted}"
-                               FontSize="15" MinimumHeightRequest="48"
-                               Completed="OnSendClicked" />
-                    </Border>
-                    <Grid Grid.Column="1" WidthRequest="54" HeightRequest="48">
-                        <Border BackgroundColor="White" StrokeThickness="0">
-                            <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                        </Border>
-                        <Path Data="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" 
-                              Fill="Black" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.9" Margin="4,0,0,0" />
-                        <Button BackgroundColor="Transparent" Clicked="OnSendClicked" />
+                <!-- Incoming Call Banner -->
+                <Frame x:Name="IncomingCallBanner" IsVisible="False" BackgroundColor="#1B5E20"
+                       BorderColor="#4CAF50" Padding="10" CornerRadius="8">
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                        <Label x:Name="IncomingCallLabel" Text="Incoming call" TextColor="White"
+                               FontSize="13" FontAttributes="Bold" VerticalOptions="Center" Grid.Column="0" />
+                        <Button Text="Accept" Grid.Column="1" Clicked="OnAcceptCallClicked"
+                                FontSize="11" Padding="8,4" BackgroundColor="#2E7D32" TextColor="White" />
+                        <Button Text="Decline" Grid.Column="2" Clicked="OnDeclineCallClicked"
+                                FontSize="11" Padding="8,4" BackgroundColor="#B71C1C" TextColor="White" />
                     </Grid>
-                </Grid>
-                <HorizontalStackLayout Spacing="10">
-                    <Grid WidthRequest="48" HeightRequest="48">
-                        <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
-                            <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                        </Border>
-                        <Path Data="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z" 
-                              Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.9" />
-                        <Button BackgroundColor="Transparent" Clicked="OnSendTestFileClicked" />
-                    </Grid>
-                    <Grid WidthRequest="48" HeightRequest="48">
-                        <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
-                            <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                        </Border>
-                        <Path Data="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" 
-                              Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.9" />
-                        <Button BackgroundColor="Transparent" Clicked="OnSendPhotoClicked" />
-                    </Grid>
-                    <Grid WidthRequest="48" HeightRequest="48">
-                        <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
-                            <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                        </Border>
-                        <Path Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" 
-                              Fill="{StaticResource SeaShellMuted}" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.9" />
-                        <Button BackgroundColor="Transparent" Clicked="OnClearChatClicked" />
-                    </Grid>
-                </HorizontalStackLayout>
+                </Frame>
+
+                <Frame BorderColor="LightGray" Padding="8" HeightRequest="140">
+                    <ScrollView x:Name="ChatScrollView">
+                        <Label x:Name="ChatLogLabel" Text="" LineBreakMode="WordWrap" FontSize="12" />
+                    </ScrollView>
+                </Frame>
             </VerticalStackLayout>
+        </ScrollView>
+    
+        <!-- Divider -->
+        <BoxView Grid.Row="1" HeightRequest="2" Color="DarkGray" />
 
-            <!-- File transfer status row -->
-            <Grid x:Name="FileStatusBar" Grid.Row="5" Padding="16,6,12,6"
-                  ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="6"
-                  BackgroundColor="{StaticResource CoalPanel}">
-                <BoxView Grid.ColumnSpan="5" HeightRequest="1"
-                         Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
-                <Label Grid.Column="0" x:Name="FileTransferLabel" Text="File: idle"
-                       FontSize="10" TextColor="{StaticResource SeaShellMuted}" VerticalOptions="Center" />
-                <Button Grid.Column="1" Text="RESUME" Clicked="OnResumeFileClicked"
-                        BackgroundColor="Transparent" BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="White" FontAttributes="Bold"
-                        FontSize="9" Padding="8,4" CornerRadius="4" />
-                <Label Grid.Column="2" x:Name="LogCountLabel" Text=""
-                       FontSize="10" TextColor="{StaticResource SeaShellMuted}" VerticalOptions="Center" />
-                <Button Grid.Column="3" Text="COPY" Clicked="OnCopyLogsClicked"
-                        BackgroundColor="Transparent" BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="White" FontAttributes="Bold"
-                        FontSize="9" Padding="8,4" CornerRadius="4" />
-                <Button Grid.Column="4" x:Name="ClearLogsBtn" Text="CLEAR" Clicked="OnClearLogsClicked"
-                        BackgroundColor="Transparent" BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="White" FontAttributes="Bold"
-                        FontSize="9" Padding="8,4" CornerRadius="4" />
+        <!-- Bottom: Technical Logs -->
+        <VerticalStackLayout Grid.Row="2" Spacing="5">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <Label Text="Technical Logs" FontAttributes="Bold" FontSize="14" Grid.Column="0" />
+                <Label x:Name="LogCountLabel" Text="" TextColor="Gray" FontSize="11" Grid.Column="1" VerticalOptions="Center" Margin="10,0,0,0" />
+                <Button Text="Copy" Grid.Column="2" Clicked="OnCopyLogsClicked" FontSize="11" Padding="6,2" BackgroundColor="#37474F" />
+                <Button x:Name="ClearLogsBtn" Text="Clear" Grid.Column="3" Clicked="OnClearLogsClicked" FontSize="11" Padding="6,2" />
             </Grid>
-
-            <!-- Empty State Overlay -->
-            <Grid x:Name="EmptyChatOverlay" Grid.Row="0" Grid.RowSpan="6" BackgroundColor="{StaticResource Coal}" IsVisible="True">
-                <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center" Spacing="20">
-                    <Path Data="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" 
-                          Fill="White" HorizontalOptions="Center" WidthRequest="72" HeightRequest="72" Aspect="Uniform" Opacity="0.2" />
-                    <Label Text="Select a chat to start messaging" TextColor="{StaticResource SeaShellMuted}" FontSize="14" HorizontalOptions="Center" />
-                </VerticalStackLayout>
-            </Grid>
-        </Grid>
-
-        <!-- ====== RIGHT: Logs panel (Desktop only) ====== -->
-        <Grid x:Name="DiagnosticsPanel" Grid.Column="2" 
-              BackgroundColor="{StaticResource CoalPanel}"
-              RowDefinitions="Auto,Auto,*" RowSpacing="0"
-              IsVisible="{OnIdiom Phone=False, Default=True}">
-            <BoxView Grid.Row="0" WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="Start" Grid.RowSpan="3" />
-
-            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Padding="20,16,12,12">
-                <Label Grid.Column="0" Text="DIAGNOSTICS" FontSize="11" FontAttributes="Bold"
-                       TextColor="{StaticResource SeaShellMuted}" CharacterSpacing="1.2"
-                       VerticalOptions="Center" />
-                <Button Grid.Column="1" x:Name="ToggleLogsBtn" Text="×"
-                        Clicked="OnToggleLogsPanelClicked"
-                        BackgroundColor="Transparent"
-                        TextColor="{StaticResource SeaShellMuted}"
-                        FontSize="16" Padding="8,0"
-                        HeightRequest="32" WidthRequest="32"
-                        CornerRadius="4" />
-            </Grid>
-            <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
-
-            <!-- Metrics bar -->
-            <Grid Grid.Row="1" Padding="16,16,16,16"
-                  ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="12">
-                <Border Grid.Row="0" Grid.Column="0" BackgroundColor="{StaticResource CoalSurface}"
-                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,8">
-                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    <StackLayout Spacing="2">
-                        <Label Text="RTT" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
-                        <Label x:Name="MetricRttLabel" Text="--" FontSize="14" FontAttributes="Bold" TextColor="White" />
-                    </StackLayout>
-                </Border>
-                <Border Grid.Row="0" Grid.Column="1" BackgroundColor="{StaticResource CoalSurface}"
-                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,8">
-                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    <StackLayout Spacing="2">
-                        <Label Text="LOSS" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
-                        <Label x:Name="MetricLossLabel" Text="--" FontSize="14" FontAttributes="Bold" TextColor="White" />
-                    </StackLayout>
-                </Border>
-                <Border Grid.Row="1" Grid.Column="0" BackgroundColor="{StaticResource CoalSurface}"
-                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,8">
-                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    <StackLayout Spacing="2">
-                        <Label Text="QUALITY" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
-                        <Label x:Name="MetricQualityLabel" Text="--" FontSize="14" FontAttributes="Bold" TextColor="White" />
-                    </StackLayout>
-                </Border>
-                <Border Grid.Row="1" Grid.Column="1" BackgroundColor="{StaticResource CoalSurface}"
-                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,8">
-                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
-                    <StackLayout Spacing="2">
-                        <Label Text="RETRIES" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
-                        <Label x:Name="MetricRetriesLabel" Text="--" FontSize="14" FontAttributes="Bold" TextColor="White" />
-                    </StackLayout>
-                </Border>
-            </Grid>
-            <BoxView Grid.Row="1" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
-
-            <ScrollView Grid.Row="2" x:Name="TechLogScrollView" Padding="16,16">
-                <VerticalStackLayout x:Name="TechLogStack" Spacing="4" />
-            </ScrollView>
-        </Grid>
+            <Frame BackgroundColor="#1a1a2e" Padding="8" CornerRadius="6">
+                <ScrollView x:Name="TechLogScrollView">
+                    <VerticalStackLayout x:Name="TechLogStack" Spacing="1" />
+                </ScrollView>
+            </Frame>
+        </VerticalStackLayout>
     </Grid>
 </ContentPage>
