@@ -30,5 +30,10 @@ public enum TransportPacketType : byte
     Disconnect = 50,
     Inventory = 60,
     MissingRequest = 61,
+    ChannelInvite = 70,
+    ChannelJoin = 71,
+    ChannelLeave = 72,
+    ChannelMembers = 73,
+    ChannelPtt = 74,
     KeyExchange = 100
 }

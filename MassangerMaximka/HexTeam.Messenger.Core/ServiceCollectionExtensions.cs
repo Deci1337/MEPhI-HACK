@@ -134,6 +134,11 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<PeerConnectionService>(),
                 sp.GetRequiredService<ILogger<MetricsService>>()));
 
+        services.AddSingleton(sp =>
+            new ChannelService(config.NodeId,
+                sp.GetRequiredService<PeerConnectionService>(),
+                sp.GetRequiredService<ILogger<ChannelService>>()));
+
         return services;
     }
 }

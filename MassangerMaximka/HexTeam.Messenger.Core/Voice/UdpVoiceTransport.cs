@@ -24,6 +24,14 @@ public sealed class UdpVoiceTransport : IDisposable
     public int ListenPort => _actualPort;
     public VoiceMetrics Metrics { get; } = new();
 
+    // Extra endpoints for channel multicast (in addition to primary _remoteEndPoint)
+    private readonly List<IPEndPoint> _extraEndPoints = [];
+    public void SetExtraEndPoints(IEnumerable<IPEndPoint> endpoints)
+    {
+        lock (_extraEndPoints) { _extraEndPoints.Clear(); _extraEndPoints.AddRange(endpoints); }
+    }
+    public void ClearExtraEndPoints() { lock (_extraEndPoints) _extraEndPoints.Clear(); }
+
     public event Action<byte[]>? FrameReceived;
 
     public UdpVoiceTransport(ILogger<UdpVoiceTransport> logger, int listenPort = DefaultVoicePort)
@@ -68,6 +76,10 @@ public sealed class UdpVoiceTransport : IDisposable
         try
         {
             await _udpClient.SendAsync(packet, packet.Length, _remoteEndPoint);
+            List<IPEndPoint> extras;
+            lock (_extraEndPoints) extras = [.._extraEndPoints];
+            foreach (var ep in extras)
+                await _udpClient.SendAsync(packet, packet.Length, ep);
             Metrics.FramesSent++;
         }
         catch (Exception ex)
