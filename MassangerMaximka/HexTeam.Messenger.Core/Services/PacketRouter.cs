@@ -2,6 +2,7 @@ using HexTeam.Messenger.Core.Models;
 using HexTeam.Messenger.Core.Protocol;
 using HexTeam.Messenger.Core.Storage;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace HexTeam.Messenger.Core.Services;
@@ -15,12 +16,16 @@ public sealed class PacketRouter
     private readonly HandshakeVerifier _verifier;
     private readonly ILogger<PacketRouter> _logger;
     private readonly Guid _localNodeId;
+    private readonly ConcurrentDictionary<Guid, Task> _activeSyncs = new();
 
     public event Action<ChatMessage>? ChatMessageReceived;
     public event Action<Guid, AckStatus>? AckReceived;
     public event Action<Envelope>? FilePacketReceived;
     public event Action<Envelope>? VoicePacketReceived;
     public event Action<RelayDecision, Envelope>? PacketRouted;
+    public event Action<Guid, Guid>? PeerReconnected;
+    public event Action<Guid>? SyncStarted;
+    public event Action<Guid>? SyncCompleted;
 
     public PacketRouter(
         RelayService relay,
@@ -43,28 +48,40 @@ public sealed class PacketRouter
     public async Task HandleIncomingAsync(Envelope envelope, Guid receivedFromNodeId, CancellationToken ct = default)
     {
         if (!ValidateEnvelope(envelope, receivedFromNodeId))
-            return;
-
-        var decision = _relay.ShouldRelay(envelope, receivedFromNodeId);
-        PacketRouted?.Invoke(decision, envelope);
-
-        switch (decision)
         {
-            case RelayDecision.Deliver:
-                await DeliverLocallyAsync(envelope, receivedFromNodeId, ct);
-                break;
-            case RelayDecision.Forward:
-                await _relay.ForwardAsync(envelope, receivedFromNodeId, ct);
-                await TryDeliverIfBroadcast(envelope, receivedFromNodeId, ct);
-                break;
-            case RelayDecision.DropDuplicate:
-                _logger.LogDebug("Dropped duplicate packet {PacketId} from {Sender}",
-                    envelope.PacketId, receivedFromNodeId);
-                break;
-            case RelayDecision.DropHopExceeded:
-                _logger.LogDebug("Dropped hop-exceeded packet {PacketId}, hops={Hops}/{Max}",
-                    envelope.PacketId, envelope.HopCount, envelope.MaxHops);
-                break;
+            _logger.LogDebug("Packet {PacketId} rejected during validation from {Sender}",
+                envelope.PacketId, receivedFromNodeId);
+            return;
+        }
+
+        try
+        {
+            var decision = _relay.ShouldRelay(envelope, receivedFromNodeId);
+            PacketRouted?.Invoke(decision, envelope);
+
+            switch (decision)
+            {
+                case RelayDecision.Deliver:
+                    await DeliverLocallyAsync(envelope, receivedFromNodeId, ct);
+                    break;
+                case RelayDecision.Forward:
+                    await _relay.ForwardAsync(envelope, receivedFromNodeId, ct);
+                    await TryDeliverIfBroadcast(envelope, receivedFromNodeId, ct);
+                    break;
+                case RelayDecision.DropDuplicate:
+                    _logger.LogDebug("Dropped duplicate packet {PacketId} from {Sender} (origin={Origin})",
+                        envelope.PacketId, receivedFromNodeId, envelope.OriginNodeId);
+                    break;
+                case RelayDecision.DropHopExceeded:
+                    _logger.LogDebug("Dropped hop-exceeded packet {PacketId}, hops={Hops}/{Max} from {Sender}",
+                        envelope.PacketId, envelope.HopCount, envelope.MaxHops, receivedFromNodeId);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing packet {PacketId} from {Sender} (PacketType={Type})",
+                envelope.PacketId, receivedFromNodeId, envelope.PacketType);
         }
     }
 
@@ -74,38 +91,80 @@ public sealed class PacketRouter
             _retry.Track(envelope, targetNodeId);
     }
 
+    public async Task OnPeerConnectedAsync(Guid peerNodeId, Guid? existingSessionId, CancellationToken ct = default)
+    {
+        if (existingSessionId.HasValue)
+        {
+            await OnPeerReconnectedAsync(peerNodeId, existingSessionId.Value, ct);
+        }
+    }
+
     public async Task OnPeerReconnectedAsync(Guid peerNodeId, Guid sessionId, CancellationToken ct = default)
     {
-        await _sync.SendInventoryAsync(sessionId, peerNodeId, ct);
-        _logger.LogInformation("Sent inventory to reconnected peer {Peer} for session {Session}",
-            peerNodeId, sessionId);
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_activeSyncs.TryAdd(peerNodeId, tcs.Task))
+        {
+            _logger.LogDebug("Sync already in progress for peer {Peer}, skipping duplicate", peerNodeId);
+            return;
+        }
+
+        try
+        {
+            SyncStarted?.Invoke(peerNodeId);
+            await _sync.SendInventoryAsync(sessionId, peerNodeId, ct);
+            _logger.LogInformation("Sent inventory to reconnected peer {Peer} for session {Session}",
+                peerNodeId, sessionId);
+            PeerReconnected?.Invoke(peerNodeId, sessionId);
+            SyncCompleted?.Invoke(peerNodeId);
+            tcs.TrySetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to sync with reconnected peer {Peer} for session {Session}",
+                peerNodeId, sessionId);
+            tcs.TrySetException(ex);
+            throw;
+        }
+        finally
+        {
+            _activeSyncs.TryRemove(peerNodeId, out _);
+        }
     }
 
     private bool ValidateEnvelope(Envelope envelope, Guid receivedFromNodeId)
     {
         if (envelope.PacketId == Guid.Empty)
         {
-            _logger.LogWarning("Rejected packet with empty PacketId from {Sender}", receivedFromNodeId);
+            _logger.LogWarning("Rejected packet: empty PacketId from {Sender} (PacketType={Type}, SessionId={Session})",
+                receivedFromNodeId, envelope.PacketType, envelope.SessionId);
             return false;
         }
 
         if (!_verifier.ValidateOrigin(envelope))
         {
-            _logger.LogWarning("Rejected packet {PacketId}: origin validation failed (origin={Origin}, hop={Hop})",
-                envelope.PacketId, envelope.OriginNodeId, envelope.HopCount);
+            _logger.LogWarning("Rejected packet {PacketId}: origin validation failed (origin={Origin}, hop={Hop}, sender={Sender})",
+                envelope.PacketId, envelope.OriginNodeId, envelope.HopCount, receivedFromNodeId);
             return false;
         }
 
         if (envelope.Payload == null)
         {
-            _logger.LogWarning("Rejected packet {PacketId}: null payload", envelope.PacketId);
+            _logger.LogWarning("Rejected packet {PacketId}: null payload from {Sender} (PacketType={Type})",
+                envelope.PacketId, receivedFromNodeId, envelope.PacketType);
             return false;
         }
 
         if (!Enum.IsDefined(envelope.PacketType))
         {
-            _logger.LogWarning("Rejected packet {PacketId}: unknown PacketType {Type}",
-                envelope.PacketId, (byte)envelope.PacketType);
+            _logger.LogWarning("Rejected packet {PacketId}: unknown PacketType {Type} from {Sender}",
+                envelope.PacketId, (byte)envelope.PacketType, receivedFromNodeId);
+            return false;
+        }
+
+        if (envelope.HopCount < 0)
+        {
+            _logger.LogWarning("Rejected packet {PacketId}: negative HopCount {Hop} from {Sender}",
+                envelope.PacketId, envelope.HopCount, receivedFromNodeId);
             return false;
         }
 
@@ -156,27 +215,57 @@ public sealed class PacketRouter
         try
         {
             var chat = JsonSerializer.Deserialize<ChatPacket>(envelope.Payload);
-            if (chat == null) return;
+            if (chat == null)
+            {
+                _logger.LogWarning("Failed to deserialize ChatPacket from packet {PacketId} (payload length={Length})",
+                    envelope.PacketId, envelope.Payload.Length);
+                return;
+            }
+
+            if (chat.MessageId == Guid.Empty)
+            {
+                _logger.LogWarning("Rejected ChatPacket with empty MessageId in packet {PacketId}",
+                    envelope.PacketId);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(chat.Text))
+            {
+                _logger.LogDebug("Received empty text message {MessageId} in packet {PacketId}",
+                    chat.MessageId, envelope.PacketId);
+            }
 
             var msg = new ChatMessage
             {
                 MessageId = chat.MessageId,
                 SessionId = envelope.SessionId,
                 SenderNodeId = envelope.OriginNodeId,
-                Text = chat.Text,
+                Text = chat.Text ?? string.Empty,
                 SentAtUtc = chat.SentAtUtc,
                 ReceivedAtUtc = DateTimeOffset.UtcNow,
                 DeliveryState = MessageDeliveryState.Delivered,
                 IsRelayed = envelope.HopCount > 0
             };
 
-            if (_messageStore.Contains(msg.MessageId)) return;
+            if (_messageStore.Contains(msg.MessageId))
+            {
+                _logger.LogDebug("Ignored duplicate message {MessageId} in packet {PacketId}",
+                    msg.MessageId, envelope.PacketId);
+                return;
+            }
+
             _messageStore.Add(msg);
             ChatMessageReceived?.Invoke(msg);
         }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "JSON deserialization failed for ChatEnvelope packet {PacketId} (payload length={Length})",
+                envelope.PacketId, envelope.Payload?.Length ?? 0);
+        }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Malformed ChatEnvelope payload in packet {PacketId}", envelope.PacketId);
+            _logger.LogError(ex, "Unexpected error handling ChatEnvelope packet {PacketId}",
+                envelope.PacketId);
         }
     }
 
@@ -185,14 +274,32 @@ public sealed class PacketRouter
         try
         {
             var ack = JsonSerializer.Deserialize<AckPacket>(envelope.Payload);
-            if (ack == null) return;
+            if (ack == null)
+            {
+                _logger.LogWarning("Failed to deserialize AckPacket from packet {PacketId} (payload length={Length})",
+                    envelope.PacketId, envelope.Payload.Length);
+                return;
+            }
+
+            if (ack.AckedPacketId == Guid.Empty)
+            {
+                _logger.LogWarning("Rejected AckPacket with empty AckedPacketId in packet {PacketId}",
+                    envelope.PacketId);
+                return;
+            }
 
             _retry.Acknowledge(ack.AckedPacketId);
             AckReceived?.Invoke(ack.AckedPacketId, ack.Status);
         }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "JSON deserialization failed for AckPacket packet {PacketId} (payload length={Length})",
+                envelope.PacketId, envelope.Payload?.Length ?? 0);
+        }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Malformed Ack payload in packet {PacketId}", envelope.PacketId);
+            _logger.LogError(ex, "Unexpected error handling AckPacket packet {PacketId}",
+                envelope.PacketId);
         }
     }
 
@@ -201,15 +308,42 @@ public sealed class PacketRouter
         try
         {
             var inv = JsonSerializer.Deserialize<InventoryPacket>(envelope.Payload);
-            if (inv == null) return;
+            if (inv == null)
+            {
+                _logger.LogWarning("Failed to deserialize InventoryPacket from packet {PacketId} (payload length={Length})",
+                    envelope.PacketId, envelope.Payload.Length);
+                return;
+            }
 
-            var missing = _sync.FindMissing(inv.SessionId, inv.MessageIds);
+            if (inv.SessionId == Guid.Empty)
+            {
+                _logger.LogWarning("Rejected InventoryPacket with empty SessionId in packet {PacketId}",
+                    envelope.PacketId);
+                return;
+            }
+
+            var missing = _sync.FindMissing(inv.SessionId, inv.MessageIds ?? []);
             if (missing.Count > 0)
+            {
+                _logger.LogDebug("Found {Count} missing messages in session {Session} from peer {Peer}",
+                    missing.Count, inv.SessionId, envelope.OriginNodeId);
                 await _sync.RequestMissingAsync(inv.SessionId, missing, envelope.OriginNodeId, ct);
+            }
+            else
+            {
+                _logger.LogDebug("No missing messages in session {Session} from peer {Peer}",
+                    inv.SessionId, envelope.OriginNodeId);
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "JSON deserialization failed for InventoryPacket packet {PacketId} (payload length={Length})",
+                envelope.PacketId, envelope.Payload?.Length ?? 0);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Malformed Inventory payload in packet {PacketId}", envelope.PacketId);
+            _logger.LogError(ex, "Unexpected error handling InventoryPacket packet {PacketId}",
+                envelope.PacketId);
         }
     }
 
@@ -218,15 +352,45 @@ public sealed class PacketRouter
         try
         {
             var req = JsonSerializer.Deserialize<MissingRequestPacket>(envelope.Payload);
-            if (req == null) return;
+            if (req == null)
+            {
+                _logger.LogWarning("Failed to deserialize MissingRequestPacket from packet {PacketId} (payload length={Length})",
+                    envelope.PacketId, envelope.Payload.Length);
+                return;
+            }
 
-            await _sync.ResendMessagesAsync(envelope.OriginNodeId, req.MissingMessageIds, ct);
-            _logger.LogDebug("Resent {Count} requested messages to {Peer}",
-                req.MissingMessageIds.Count, envelope.OriginNodeId);
+            if (req.SessionId == Guid.Empty)
+            {
+                _logger.LogWarning("Rejected MissingRequestPacket with empty SessionId in packet {PacketId}",
+                    envelope.PacketId);
+                return;
+            }
+
+            var missingIds = req.MissingMessageIds ?? [];
+            if (missingIds.Count == 0)
+            {
+                _logger.LogDebug("Received empty MissingRequestPacket in packet {PacketId} from {Peer}",
+                    envelope.PacketId, envelope.OriginNodeId);
+                return;
+            }
+
+            _logger.LogInformation("Resending {Count} requested messages to {Peer} for session {Session}",
+                missingIds.Count, envelope.OriginNodeId, req.SessionId);
+
+            await _sync.ResendMessagesAsync(envelope.OriginNodeId, missingIds, ct);
+
+            _logger.LogDebug("Completed resending {Count} messages to {Peer}",
+                missingIds.Count, envelope.OriginNodeId);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "JSON deserialization failed for MissingRequestPacket packet {PacketId} (payload length={Length})",
+                envelope.PacketId, envelope.Payload?.Length ?? 0);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Malformed MissingRequest payload in packet {PacketId}", envelope.PacketId);
+            _logger.LogError(ex, "Unexpected error handling MissingRequestPacket packet {PacketId}",
+                envelope.PacketId);
         }
     }
 }
