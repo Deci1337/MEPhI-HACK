@@ -90,15 +90,38 @@ public sealed class VoiceCallManager : IDisposable
             var source = await _talkRecorder.StopAsync();
             _talkRecorder = null;
 
-            string? filePath = null;
+            byte[]? wavBytes = null;
+
             if (source is FileAudioSource fsa)
-                filePath = fsa.GetFilePath();
-            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return;
+            {
+                var filePath = fsa.GetFilePath();
+                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                {
+                    wavBytes = await File.ReadAllBytesAsync(filePath);
+                    try { File.Delete(filePath); } catch { }
+                }
+            }
 
-            var wavBytes = await File.ReadAllBytesAsync(filePath);
-            try { File.Delete(filePath); } catch { }
+            // Fallback: read via stream (works on Android when FileAudioSource path is unavailable)
+            if (wavBytes == null || wavBytes.Length <= WavHelper.HeaderSize)
+            {
+                try
+                {
+                    await using var stream = source.GetAudioStream();
+                    if (stream != null)
+                    {
+                        using var ms = new MemoryStream();
+                        await stream.CopyToAsync(ms);
+                        wavBytes = ms.ToArray();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log?.Invoke($"PTT stream fallback error: {ex.Message}");
+                }
+            }
 
-            if (wavBytes.Length <= WavHelper.HeaderSize) return;
+            if (wavBytes == null || wavBytes.Length <= WavHelper.HeaderSize) return;
             var pcm = WavHelper.StripHeader(wavBytes);
             if (pcm.Length == 0) return;
 

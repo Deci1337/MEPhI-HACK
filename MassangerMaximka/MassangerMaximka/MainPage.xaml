@@ -16,7 +16,7 @@
     <!-- Two-column on Desktop, stacked on Phone -->
     <Grid ColumnSpacing="0" RowSpacing="0">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="{OnIdiom Phone=100, Default=220}" />
+            <ColumnDefinition Width="{OnIdiom Phone=140, Default=220}" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -45,13 +45,13 @@
                             SelectionChanged="OnPeerSelected">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="x:String">
-                        <Grid Padding="{OnIdiom Phone='6,8', Default='10,10'}" BackgroundColor="Transparent">
-                            <Grid.GestureRecognizers>
-                                <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
-                            </Grid.GestureRecognizers>
-                            <Label Text="{Binding}" FontSize="{OnIdiom Phone=10, Default=12}"
+                        <Grid Padding="{OnIdiom Phone='8,10', Default='10,10'}"
+                              BackgroundColor="Transparent"
+                              MinimumHeightRequest="{OnIdiom Phone=44, Default=36}">
+                            <Label Text="{Binding}" FontSize="{OnIdiom Phone=11, Default=12}"
                                    TextColor="{StaticResource SeaShell}"
-                                   LineBreakMode="TailTruncation" />
+                                   LineBreakMode="TailTruncation"
+                                   VerticalOptions="Center" />
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>

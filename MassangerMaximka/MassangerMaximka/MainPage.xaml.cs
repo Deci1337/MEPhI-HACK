@@ -62,6 +62,7 @@ namespace MassangerMaximka
         private string? _activeChatPeer;
         private readonly Dictionary<string, ChatItem> _pendingItems = new();
         private readonly Dictionary<string, System.Net.IPEndPoint> _peerEndpointMap = new();
+        private readonly Dictionary<string, int> _peerVoicePortMap = new();
         private readonly HashSet<string> _unreadPeers = new();
         private int _techLogCount;
         private volatile bool _suppressTechLog;
@@ -269,11 +270,11 @@ namespace MassangerMaximka
                     var callerIp = _peerEndpointMap.TryGetValue(msg.FromNodeId, out var tcpEp)
                         ? tcpEp.Address
                         : (IPAddress.TryParse(ipStr, out var parsed) ? parsed : null);
+                    _peerVoicePortMap[msg.FromNodeId] = voicePort;
                     if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
                     {
                         if (callerIp != null)
                         {
-                            _peerEndpointMap[msg.FromNodeId] = new System.Net.IPEndPoint(callerIp, voicePort);
                             SetChannelVoiceEndPoints();
                             if (!_isInCall) _ = StartChannelCallAsync();
                         }
@@ -295,7 +296,7 @@ namespace MassangerMaximka
 
                 if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal) || text == CallAcceptLegacy)
                 {
-                    if (_isCallingOut && _callPeerNodeId == msg.FromNodeId && _callPeerIp != null)
+                    if (_isCallingOut && _callPeerIp != null)
                     {
                         _isCallingOut = false;
                         if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal))
@@ -307,6 +308,8 @@ namespace MassangerMaximka
                         }
                         if (_peerEndpointMap.TryGetValue(msg.FromNodeId, out var tcpEp))
                             _callPeerIp = tcpEp.Address;
+                        _peerVoicePortMap[msg.FromNodeId] = _callPeerVoicePort;
+                        if (_callPeerNodeId == null) _callPeerNodeId = msg.FromNodeId;
                         TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId} ip={_callPeerIp} voice_port={_callPeerVoicePort}");
                         _ = StartCallAsync(_callPeerNodeId, _callPeerIp, _callPeerVoicePort);
                     }
@@ -626,7 +629,7 @@ namespace MassangerMaximka
             {
                 if (_peerEndpointMap.TryGetValue(m, out var tcpEp))
                 {
-                    var voicePort = _voice.ListenPort;
+                    var voicePort = _peerVoicePortMap.TryGetValue(m, out var vp) ? vp : _voice.ListenPort;
                     extras.Add(new System.Net.IPEndPoint(tcpEp.Address, voicePort));
                 }
             }
@@ -691,10 +694,16 @@ namespace MassangerMaximka
 
         private async void OnPeerDoubleTapped(object? sender, TappedEventArgs e)
         {
-            if (sender is not Label label)
+            string? displayText = null;
+            if (sender is Label label)
+                displayText = label.Text;
+            else if (sender is Grid grid && grid.Children.OfType<Label>().FirstOrDefault() is Label childLabel)
+                displayText = childLabel.Text;
+
+            if (string.IsNullOrWhiteSpace(displayText))
                 return;
 
-            var endPointText = ExtractEndPoint(label.Text);
+            var endPointText = ExtractEndPoint(displayText);
             if (string.IsNullOrWhiteSpace(endPointText))
                 return;
 
@@ -705,7 +714,7 @@ namespace MassangerMaximka
             if (_connections == null || _discovery == null)
                 return;
 
-            var nodeId = ExtractNodeId(label.Text) ?? $"manual-{ip}:{port}";
+            var nodeId = ExtractNodeId(displayText) ?? $"manual-{ip}:{port}";
             RememberPeer($"Manual {ip}", ip.ToString(), port);
             _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
             TechLog(LogCat.Network, $"Double-tap connect -> {ip}:{port}");
@@ -1058,8 +1067,7 @@ namespace MassangerMaximka
 
             _callPeerNodeId = nodeId;
             _callPeerIp = ip;
-            var config = MauiProgram.AppInstance?.Services.GetService<NodeConfiguration>();
-            _callPeerVoicePort = config?.VoicePort ?? 45679;
+            _callPeerVoicePort = _peerVoicePortMap.TryGetValue(nodeId, out var knownVp) ? knownVp : (_voice?.ListenPort ?? 45679);
             _isCallingOut = true;
 
             var localIp = GetLocalIpAddress();
@@ -1101,11 +1109,13 @@ namespace MassangerMaximka
             {
                 AppendToChannelChat($"[Error] Channel call failed: {ex.Message}");
                 _isInCall = false;
+                ResetCallingState();
                 return;
             }
 
             var voicePort = _voice.ListenPort;
             var localIp = GetLocalIpAddress();
+            if (_localNodeId != null) _peerVoicePortMap[_localNodeId] = voicePort;
             foreach (var m in _channelMembers.Where(m => m != _localNodeId))
                 _ = SendCallSignalAsync(m, $"{CallRequestPrefix}{localIp}:{voicePort}");
 
@@ -1124,16 +1134,19 @@ namespace MassangerMaximka
             if (_voice == null || _audioManager == null)
             {
                 AppendChat("[Error] Voice transport or audio not available");
+                ResetCallingState();
                 return;
             }
 
             if (!await EnsureMicPermissionAsync())
             {
                 AppendChat("[Error] Microphone permission denied");
+                ResetCallingState();
                 return;
             }
 
             _isInCall = true;
+            _callPeerNodeId = nodeId;
             var remoteVoiceEndPoint = new System.Net.IPEndPoint(ip, voicePort);
 
             try
@@ -1149,6 +1162,7 @@ namespace MassangerMaximka
                 AppendChat($"[Error] Voice transport failed to start: {ex.Message}");
                 TechLog(LogCat.System, $"Voice call start error: {ex.Message}");
                 _isInCall = false;
+                ResetCallingState();
                 return;
             }
 
@@ -1204,7 +1218,8 @@ namespace MassangerMaximka
             _callPeerNodeId = fromNodeId;
             _callPeerIp = callerIp;
             _callPeerVoicePort = callerVoicePort;
-            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice={localIp}:{localVoicePort} peer_tcp_ip={callerIp}");
+            _peerVoicePortMap[fromNodeId] = callerVoicePort;
+            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice={localIp}:{localVoicePort} peer_tcp_ip={callerIp} peer_voice={callerVoicePort}");
             await StartCallAsync(fromNodeId, callerIp, callerVoicePort);
         }
 
