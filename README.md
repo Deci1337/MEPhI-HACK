@@ -142,6 +142,8 @@ flowchart TB
     UdpDiscoveryService --> UDP
 ```
 
+- **HexChatService** — отправка текста через ITransport/PacketRouter.
+
 Полное описание архитектурных решений, дедупликации пакетов и модели угроз находится в файлах:
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md)

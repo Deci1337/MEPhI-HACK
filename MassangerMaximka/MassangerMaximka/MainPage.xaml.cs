@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using HexTeam.Messenger.Core.Abstractions;
 using HexTeam.Messenger.Core.Discovery;
 using HexTeam.Messenger.Core.FileTransfer;
 using HexTeam.Messenger.Core.Models;
@@ -19,6 +20,7 @@ namespace MassangerMaximka
         private UdpDiscoveryService? _discovery;
         private PeerConnectionService? _connections;
         private TcpChatTransport? _chat;
+        private IHexChatService? _hexChat;
         private FileTransferService? _files;
         private UdpVoiceTransport? _voice;
         private MetricsService? _metrics;
@@ -87,6 +89,7 @@ namespace MassangerMaximka
             _discovery = services.GetService<UdpDiscoveryService>();
             _connections = services.GetService<PeerConnectionService>();
             _chat = services.GetService<TcpChatTransport>();
+            _hexChat = services.GetService<IHexChatService>();
             _files = services.GetService<FileTransferService>();
             _voice = services.GetService<UdpVoiceTransport>();
             _metrics = services.GetService<MetricsService>();
@@ -112,6 +115,8 @@ namespace MassangerMaximka
             _chat.MessageReceived += OnMessageReceived;
             _chat.ImageReceived += OnImageReceived;
             _chat.DeliveryStatusChanged += OnDeliveryStatusChanged;
+            if (_hexChat != null)
+                _hexChat.DeliveryStatusChanged += OnDeliveryStatusChanged;
             _files.TransferProgressChanged += OnTransferProgressChanged;
             _files.FileReceived += OnFileReceived;
             if (_metrics != null) _metrics.MetricsUpdated += OnMetricsUpdated;
@@ -159,6 +164,8 @@ namespace MassangerMaximka
             if (_discovery != null) { _discovery.PeerDiscovered -= OnPeerDiscovered; _discovery.PeerLost -= OnPeerLost; }
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
             if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.ImageReceived -= OnImageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
+            if (_hexChat != null)
+                _hexChat.DeliveryStatusChanged -= OnDeliveryStatusChanged;
             if (_files != null) { _files.TransferProgressChanged -= OnTransferProgressChanged; _files.FileReceived -= OnFileReceived; }
             if (_metrics != null) _metrics.MetricsUpdated -= OnMetricsUpdated;
             DisposeVoicePlayback();
@@ -842,7 +849,15 @@ namespace MassangerMaximka
                 }
             }
             TechLog(LogCat.Transport, $"SEND ChatPacket to={toNodeId} len={text.Length}");
-            var sentMsg = await _chat.SendMessageAsync(toNodeId, text);
+            TransportChatMessage sentMsg;
+            if (_hexChat != null)
+            {
+                sentMsg = await _hexChat.SendMessageAsync(toNodeId, text);
+            }
+            else
+            {
+                sentMsg = await _chat.SendMessageAsync(toNodeId, text);
+            }
             var item = AppendChat($"Me: {text}", status: "Sent");
             _pendingItems[sentMsg.MessageId] = item;
             TechLog(LogCat.Protocol, $"SENT id={sentMsg.MessageId} status={sentMsg.Status}");
