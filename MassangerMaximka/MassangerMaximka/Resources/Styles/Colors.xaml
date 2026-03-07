@@ -4,32 +4,44 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
 
-    <!-- Note: For Android please see also Platforms\Android\Resources\values\colors.xml -->
+    <!-- ===== PHOTON Design System ===== -->
 
-    <Color x:Key="Coal">#1C1C1C</Color>
-    <Color x:Key="CoalPanel">#181818</Color>
-    <Color x:Key="CoalSurface">#222222</Color>
-    <Color x:Key="CoalInput">#1A1A1A</Color>
-    <Color x:Key="CoalBorder">#2E2E2E</Color>
-    <Color x:Key="SeaShell">#FFF5EE</Color>
-    <Color x:Key="SeaShellMuted">#7A7570</Color>
-    <Color x:Key="AccentBlue">#4A90D9</Color>
-    <Color x:Key="DangerRed">#7A1F1F</Color>
-    <Color x:Key="SuccessGreen">#1A4A20</Color>
+    <!-- Background layers -->
+    <Color x:Key="Coal">#0F1018</Color>
+    <Color x:Key="CoalPanel">#141520</Color>
+    <Color x:Key="CoalSurface">#1E2030</Color>
+    <Color x:Key="CoalInput">#181A26</Color>
+    <Color x:Key="CoalBorder">#2A2D42</Color>
+    <Color x:Key="CoalElevated">#252840</Color>
 
-    <Color x:Key="Primary">#512BD4</Color>
+    <!-- Text -->
+    <Color x:Key="SeaShell">#E6E8F5</Color>
+    <Color x:Key="SeaShellMuted">#6B6F8A</Color>
+    <Color x:Key="SeaShellDim">#3C3F58</Color>
+
+    <!-- Accents -->
+    <Color x:Key="AccentBlue">#5B8DEF</Color>
+    <Color x:Key="AccentBlueDark">#2B4C8C</Color>
+    <Color x:Key="AccentGreen">#3DDC84</Color>
+    <Color x:Key="AccentGreenDark">#1A5C38</Color>
+    <Color x:Key="AccentAmber">#F0A32A</Color>
+    <Color x:Key="DangerRed">#E05252</Color>
+    <Color x:Key="DangerRedDark">#6B1F1F</Color>
+    <Color x:Key="SuccessGreen">#2ECC71</Color>
+    <Color x:Key="SuccessGreenDark">#1A5C38</Color>
+
+    <!-- Legacy required -->
+    <Color x:Key="Primary">#5B8DEF</Color>
     <Color x:Key="PrimaryDark">#ac99ea</Color>
     <Color x:Key="PrimaryDarkText">#242424</Color>
     <Color x:Key="Secondary">#DFD8F7</Color>
     <Color x:Key="SecondaryDarkText">#9880e5</Color>
     <Color x:Key="Tertiary">#2B0B98</Color>
-
     <Color x:Key="White">White</Color>
     <Color x:Key="Black">Black</Color>
     <Color x:Key="Magenta">#D600AA</Color>
     <Color x:Key="MidnightBlue">#190649</Color>
     <Color x:Key="OffBlack">#1f1f1f</Color>
-
     <Color x:Key="Gray100">#E1E1E1</Color>
     <Color x:Key="Gray200">#C8C8C8</Color>
     <Color x:Key="Gray300">#ACACAC</Color>
@@ -38,13 +50,11 @@
     <Color x:Key="Gray600">#404040</Color>
     <Color x:Key="Gray900">#212121</Color>
     <Color x:Key="Gray950">#141414</Color>
-
     <SolidColorBrush x:Key="PrimaryBrush" Color="{StaticResource Primary}"/>
     <SolidColorBrush x:Key="SecondaryBrush" Color="{StaticResource Secondary}"/>
     <SolidColorBrush x:Key="TertiaryBrush" Color="{StaticResource Tertiary}"/>
     <SolidColorBrush x:Key="WhiteBrush" Color="{StaticResource White}"/>
     <SolidColorBrush x:Key="BlackBrush" Color="{StaticResource Black}"/>
-
     <SolidColorBrush x:Key="Gray100Brush" Color="{StaticResource Gray100}"/>
     <SolidColorBrush x:Key="Gray200Brush" Color="{StaticResource Gray200}"/>
     <SolidColorBrush x:Key="Gray300Brush" Color="{StaticResource Gray300}"/>
@@ -53,4 +63,5 @@
     <SolidColorBrush x:Key="Gray600Brush" Color="{StaticResource Gray600}"/>
     <SolidColorBrush x:Key="Gray900Brush" Color="{StaticResource Gray900}"/>
     <SolidColorBrush x:Key="Gray950Brush" Color="{StaticResource Gray950}"/>
+
 </ResourceDictionary>
