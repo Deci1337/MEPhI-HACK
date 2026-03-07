@@ -7,7 +7,12 @@
     Title="MassangerMaximka">
 
     <ShellContent
-        Title="Home"
+        Title="Nearby"
+        ContentTemplate="{DataTemplate local:NearbyPage}"
+        Route="NearbyPage" />
+
+    <ShellContent
+        Title="Dev"
         ContentTemplate="{DataTemplate local:MainPage}"
         Route="MainPage" />
 
