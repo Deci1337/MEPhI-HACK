@@ -8,6 +8,10 @@
 
 **Проект разработан в рамках хакатона "Nuclear IT Hack".**
 
+## Видео-демонстрация
+
+[ВИДЕО-ДЕМОНСТРАЦИЯ](https://drive.google.com/file/d/1TAun2sH_EOAJMRvUShmzoJ4Cl-zAl6W-/view?usp=drive_link)
+
 ## 🌟 Ключевые возможности
 
 *   **P2P Обнаружение узлов (Peer Discovery)**: Автоматическое обнаружение устройств в локальной сети (Wi-Fi / Hotspot) через UDP broadcast.
