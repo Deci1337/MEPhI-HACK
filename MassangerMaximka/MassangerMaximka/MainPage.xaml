@@ -41,20 +41,26 @@
 
             <!-- App header -->
             <Grid Grid.Row="0" Padding="20,24,20,16" ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                <!-- Logo -->
+                <!-- Device avatar icon -->
                 <Border Grid.Column="0"
-                        BackgroundColor="White"
-                        StrokeThickness="0"
+                        BackgroundColor="#1A1A1A"
+                        StrokeThickness="1" Stroke="#333333"
                         HeightRequest="40" WidthRequest="40"
                         VerticalOptions="Center">
                     <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="8" />
+                        <RoundRectangle CornerRadius="10" />
                     </Border.StrokeShape>
-                    <Label Text="E" FontFamily="OpenSansSemibold" FontSize="20" TextColor="Black" HorizontalOptions="Center" VerticalOptions="Center" />
+                    <!-- Simple laptop/device icon -->
+                    <Path Data="M4 6h16v10H4V6zm-1 11h18l1 2H3l1-2zm5-8h6v1H8V9zm0 2h6v1H8v-1z"
+                          Fill="White" HorizontalOptions="Center" VerticalOptions="Center"
+                          WidthRequest="22" HeightRequest="22" Aspect="Uniform" />
                 </Border>
                 <StackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                    <Label Text="ETHERнет" FontFamily="OpenSansSemibold" FontSize="16" FontAttributes="Bold"
-                           TextColor="White" CharacterSpacing="1.5" />
+                    <Label x:Name="DeviceNameLabel"
+                           Text="This device"
+                           FontFamily="OpenSansSemibold" FontSize="15" FontAttributes="Bold"
+                           TextColor="White"
+                           LineBreakMode="TailTruncation" />
                     <Label x:Name="StatusLabel" Text="Starting..." FontSize="11"
                            TextColor="{StaticResource SeaShellMuted}" />
                 </StackLayout>
@@ -274,6 +280,9 @@
                                         StrokeThickness="{Binding BubbleStrokeThickness}"
                                         MaximumWidthRequest="500"
                                         Padding="{Binding BubblePadding}">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="14" />
+                                    </Border.StrokeShape>
                                     <StackLayout Spacing="4">
                                         <Label Text="{Binding Text}"
                                                FontFamily="OpenSansRegular"
@@ -296,6 +305,9 @@
                                         Stroke="{Binding BubbleStrokeColor}"
                                         StrokeThickness="{Binding BubbleStrokeThickness}"
                                         Padding="12,10">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="14" />
+                                    </Border.StrokeShape>
                                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                                         <Button Grid.Column="0" Text="▶"
                                                 BackgroundColor="Transparent"
@@ -319,6 +331,9 @@
                                         Stroke="{Binding BubbleStrokeColor}"
                                         StrokeThickness="{Binding BubbleStrokeThickness}"
                                         Padding="8">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="14" />
+                                    </Border.StrokeShape>
                                     <StackLayout Spacing="8">
                                         <Label Text="{Binding Text}"
                                                FontFamily="OpenSansRegular"

@@ -128,6 +128,8 @@ namespace MassangerMaximka
             }
 
             StatusLabel.Text = $"TCP: {_connections.ListenPort} | NodeId: {config?.NodeId ?? "?"}";
+            var rawName = config?.DisplayName ?? DeviceInfo.Name ?? "This device";
+            DeviceNameLabel.Text = rawName.Length > 20 ? rawName[..20] + "…" : rawName;
             var otherPort = _connections.ListenPort == 45680 ? 45681 : 45680;
             PortHintLabel.Text = $"Auto-discovery enabled. Fallback connect: 127.0.0.1:{otherPort}";
 
