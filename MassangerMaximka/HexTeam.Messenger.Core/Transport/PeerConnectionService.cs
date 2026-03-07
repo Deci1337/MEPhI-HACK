@@ -104,13 +104,31 @@ public sealed class PeerConnectionService : IDisposable
         if (!_connections.TryGetValue(peerNodeId, out var conn))
             throw new InvalidOperationException($"No connection to peer {peerNodeId}");
         await conn.WriteLock.WaitAsync(ct);
+        bool lockReleased = false;
         try
         {
             await WriteEnvelopeAsync(conn, envelope, ct);
         }
+        catch (IOException ex)
+        {
+            lockReleased = true;
+            conn.WriteLock.Release();
+            _logger.LogWarning(ex, "Send to {NodeId} failed with IO error; removing stale connection", peerNodeId);
+            DisconnectPeer(peerNodeId);
+            throw;
+        }
+        catch (SocketException ex)
+        {
+            lockReleased = true;
+            conn.WriteLock.Release();
+            _logger.LogWarning(ex, "Send to {NodeId} failed with socket error; removing stale connection", peerNodeId);
+            DisconnectPeer(peerNodeId);
+            throw;
+        }
         finally
         {
-            conn.WriteLock.Release();
+            if (!lockReleased)
+                conn.WriteLock.Release();
         }
     }
 

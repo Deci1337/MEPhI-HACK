@@ -52,12 +52,16 @@ public sealed class TcpChatTransport
                 throw new InvalidOperationException($"Peer {toNodeId} is not connected.");
 
             await _connectionService.SendAsync(toNodeId, envelope, ct);
+
+            if (!_connectionService.IsConnected(toNodeId))
+                _logger.LogWarning("Peer {NodeId} disconnected immediately after send of {Id}", toNodeId, msg.MessageId);
+
             msg.Status = DeliveryStatus.Sent;
             DeliveryStatusChanged?.Invoke(msg.MessageId, msg.Status);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to send message {Id}", msg.MessageId);
+            _logger.LogError(ex, "Failed to send message {Id} to {NodeId}", msg.MessageId, toNodeId);
             msg.Status = DeliveryStatus.Failed;
             DeliveryStatusChanged?.Invoke(msg.MessageId, msg.Status);
         }

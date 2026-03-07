@@ -9,6 +9,7 @@ public sealed class UdpVoiceTransport : IDisposable
 {
     private const int DefaultVoicePort = 45679;
     private const int JitterBufferSize = 10;
+    private const int KeepaliveDataSize = 160; // 10ms silence at 16kHz mono 16-bit
 
     private readonly ILogger<UdpVoiceTransport> _logger;
     private readonly int _listenPort;
@@ -19,9 +20,12 @@ public sealed class UdpVoiceTransport : IDisposable
 
     private readonly ConcurrentQueue<VoiceFrame> _jitterBuffer = new();
     private int _sequenceNumber;
+    private int _keepaliveTxCount;
+    private int _keepaliveRxCount;
 
     public bool IsActive { get; private set; }
     public int ListenPort => _actualPort;
+    public IPEndPoint? RemoteEndPoint => _remoteEndPoint;
     public VoiceMetrics Metrics { get; } = new();
 
     // Extra endpoints for channel multicast (in addition to primary _remoteEndPoint)
@@ -115,6 +119,16 @@ public sealed class UdpVoiceTransport : IDisposable
                 var frame = DeserializeFrame(result.Buffer);
                 if (frame == null) continue;
 
+                // Filter keepalive-sized frames -- they are silence padding, not real audio
+                if (frame.Data.Length <= KeepaliveDataSize)
+                {
+                    var rxCount = Interlocked.Increment(ref _keepaliveRxCount);
+                    if (rxCount % 10 == 1)
+                        _logger.LogInformation("Voice keepalive RX: count={N} remote={EP}",
+                            rxCount, result.RemoteEndPoint);
+                    continue;
+                }
+
                 Metrics.FramesReceived++;
                 var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 var latency = now - frame.TimestampMs;
@@ -148,19 +162,15 @@ public sealed class UdpVoiceTransport : IDisposable
 
     private async Task SendKeepAliveAsync(CancellationToken ct)
     {
-        var ping = SerializeFrame(new VoiceFrame
-        {
-            Sequence = 0,
-            TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            Data = []
-        });
-
-        for (var burst = 0; burst < 3; burst++)
+        // 5-packet burst to punch through NAT -- 30ms intervals, 150ms total window
+        for (var burst = 0; burst < 5; burst++)
         {
             try
             {
+                var ping = BuildKeepalivePacket();
                 await SendPingToAllEndpoints(ping);
-                await Task.Delay(50, ct);
+                LogKeepaliveSent();
+                await Task.Delay(30, ct);
             }
             catch (OperationCanceledException) { return; }
             catch { }
@@ -171,11 +181,27 @@ public sealed class UdpVoiceTransport : IDisposable
             try
             {
                 await Task.Delay(2000, ct);
+                var ping = BuildKeepalivePacket();
                 await SendPingToAllEndpoints(ping);
+                LogKeepaliveSent();
             }
             catch (OperationCanceledException) { return; }
             catch { }
         }
+    }
+
+    private byte[] BuildKeepalivePacket() => SerializeFrame(new VoiceFrame
+    {
+        Sequence = 0,
+        TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        Data = new byte[KeepaliveDataSize]
+    });
+
+    private void LogKeepaliveSent()
+    {
+        var n = Interlocked.Increment(ref _keepaliveTxCount);
+        if (n % 10 == 1)
+            _logger.LogInformation("Voice keepalive: sent={N} remote={EP}", n, _remoteEndPoint);
     }
 
     private async Task SendPingToAllEndpoints(byte[] packet)

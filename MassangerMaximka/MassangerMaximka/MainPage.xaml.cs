@@ -416,7 +416,10 @@ namespace MassangerMaximka
             {
                 if (_pendingItems.TryGetValue(messageId, out var item))
                     item.Status = status.ToString();
-                TechLog(LogCat.Protocol, $"Delivery {messageId}: {status}");
+                if (status == DeliveryStatus.Failed)
+                    TechLogError(LogCat.Protocol, $"Delivery {messageId}: {status}");
+                else
+                    TechLog(LogCat.Protocol, $"Delivery {messageId}: {status}");
             });
         }
 
@@ -438,7 +441,7 @@ namespace MassangerMaximka
                 {
                     AppendChat($"[File Error] {savedPath}");
                     FileTransferLabel.Text = $"File: save failed";
-                    TechLog(LogCat.System, $"FILE SAVE FAILED id={transferId} {savedPath}");
+                    TechLogError(LogCat.System, $"FILE SAVE FAILED id={transferId} {savedPath}");
                     return;
                 }
 
@@ -825,7 +828,7 @@ namespace MassangerMaximka
             catch (Exception ex)
             {
                 AppendChat($"[Error] File send failed: {ex.Message}");
-                TechLog(LogCat.System, $"File send failed: {ex.Message}");
+                TechLogError(LogCat.System, $"File send failed: {ex.Message}");
             }
         }
 
@@ -882,7 +885,7 @@ namespace MassangerMaximka
             catch (Exception ex)
             {
                 AppendChat($"[Error] Photo send failed: {ex.Message}");
-                TechLog(LogCat.System, $"Photo send failed: {ex.Message}");
+                TechLogError(LogCat.System, $"Photo send failed: {ex.Message}");
             }
         }
 
@@ -957,7 +960,7 @@ namespace MassangerMaximka
             catch (Exception ex)
             {
                 AppendChat($"[Error] Record failed: {ex.Message}");
-                TechLog(LogCat.System, $"Voice record error: {ex.Message}");
+                TechLogError(LogCat.System, $"Voice record error: {ex.Message}");
             }
         }
 
@@ -1020,7 +1023,7 @@ namespace MassangerMaximka
                 StopSendBtn.Text = "STOP";
                 StopSendBtn.BackgroundColor = Color.FromArgb("#3A3530");
                 AppendChat($"[Error] Voice send failed: {ex.Message}");
-                TechLog(LogCat.System, $"Voice send error: {ex.Message}");
+                TechLogError(LogCat.System, $"Voice send error: {ex.Message}");
                 VoiceStatusLabel.Text = "Voice: idle";
             }
         }
@@ -1112,6 +1115,8 @@ namespace MassangerMaximka
                 _voiceCallManager = new VoiceCallManager(_voice, _audioManager);
                 _voiceCallManager.Log += msg =>
                     MainThread.BeginInvokeOnMainThread(() => TechLog(LogCat.System, msg));
+                _voiceCallManager.LogError += msg =>
+                    MainThread.BeginInvokeOnMainThread(() => TechLogError(LogCat.System, msg));
                 _voice.StartListening();
                 _voiceCallManager.StartChannelMode();
             }
@@ -1164,12 +1169,14 @@ namespace MassangerMaximka
                 _voiceCallManager = new VoiceCallManager(_voice, _audioManager);
                 _voiceCallManager.Log += msg =>
                     MainThread.BeginInvokeOnMainThread(() => TechLog(LogCat.System, msg));
+                _voiceCallManager.LogError += msg =>
+                    MainThread.BeginInvokeOnMainThread(() => TechLogError(LogCat.System, msg));
                 _voiceCallManager.Start(remoteVoiceEndPoint);
             }
             catch (Exception ex)
             {
                 AppendChat($"[Error] Voice transport failed to start: {ex.Message}");
-                TechLog(LogCat.System, $"Voice call start error: {ex.Message}");
+                TechLogError(LogCat.System, $"Voice call start error: {ex.Message}");
                 _isInCall = false;
                 ResetCallingState();
                 return;
@@ -1181,8 +1188,9 @@ namespace MassangerMaximka
             CallBtn.Text = "Hang Up";
             CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
             VoiceStatusLabel.Text = "Hold Talk to speak";
+            var localVoicePort = _voice?.ListenPort ?? 45679;
             AppendChat($"[Call] Walkie-talkie with {ResolveDisplayName(nodeId)}");
-            TechLog(LogCat.Network, $"Voice call started -> {ip}:{voicePort}");
+            TechLog(LogCat.Network, $"Voice call: LOCAL :{localVoicePort} -> REMOTE {ip}:{voicePort}");
         }
 
         private void EndCall()
@@ -1344,7 +1352,7 @@ namespace MassangerMaximka
             }
             catch (Exception ex)
             {
-                TechLog(LogCat.System, $"Voice play error: {ex.Message}");
+                TechLogError(LogCat.System, $"Voice play error: {ex.Message}");
                 _ = Launcher.OpenAsync(new OpenFileRequest("Voice", new ReadOnlyFile(path)));
             }
         }
@@ -1412,21 +1420,11 @@ namespace MassangerMaximka
                 PlayVoiceFile(path);
         }
 
-        private void TechLog(LogCat cat, string text)
+        private void TechLog(LogCat cat, string text, bool isError = false)
         {
             if (_suppressTechLog) return;
-            var color = cat switch
-            {
-                LogCat.Encryption => Color.FromArgb("#00C853"),   // bright green
-                LogCat.Network    => Color.FromArgb("#29B6F6"),   // light blue
-                LogCat.Transport  => Color.FromArgb("#FFB300"),   // amber
-                LogCat.Protocol   => Color.FromArgb("#CE93D8"),   // light purple
-                LogCat.Discovery  => Color.FromArgb("#4DD0E1"),   // cyan
-                LogCat.Metrics    => Color.FromArgb("#FF8A65"),   // orange
-                LogCat.System     => Color.FromArgb("#BDBDBD"),   // gray
-                LogCat.Relay      => Color.FromArgb("#F06292"),   // pink
-                _ => Colors.White
-            };
+
+            var color = isError ? Color.FromArgb("#FF5252") : Colors.White;
 
             var prefix = cat switch
             {
@@ -1461,6 +1459,8 @@ namespace MassangerMaximka
             }
             catch { }
         }
+
+        private void TechLogError(LogCat cat, string text) => TechLog(cat, text, isError: true);
 
         // --- Helpers ---
 
@@ -1792,11 +1792,11 @@ namespace MassangerMaximka
                 if (connected)
                     TechLog(LogCat.Network, $"Auto-connected to {peer.NodeKey}");
                 else
-                    TechLog(LogCat.Network, $"Auto-connect failed for {peer.NodeKey}");
+                    TechLogError(LogCat.Network, $"Auto-connect failed for {peer.NodeKey}");
             }
             catch (Exception ex)
             {
-                TechLog(LogCat.System, $"Auto-connect error for {peer.NodeKey}: {ex.Message}");
+                TechLogError(LogCat.System, $"Auto-connect error for {peer.NodeKey}: {ex.Message}");
             }
             finally
             {

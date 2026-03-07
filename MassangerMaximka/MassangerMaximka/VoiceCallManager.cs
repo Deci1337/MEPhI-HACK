@@ -21,11 +21,14 @@ public sealed class VoiceCallManager : IDisposable
     private volatile bool _talking;
     private IAudioRecorder? _talkRecorder;
     private int _receivedCount;
+    private volatile bool _firstFrameSent;
+    private volatile bool _firstFrameReceived;
 
     public bool IsActive => _active;
     public bool IsTalking => _talking;
 
     public event Action<string>? Log;
+    public event Action<string>? LogError;
 
     public VoiceCallManager(UdpVoiceTransport transport, IAudioManager audioManager)
     {
@@ -61,6 +64,8 @@ public sealed class VoiceCallManager : IDisposable
     {
         if (!_active || _talking) return;
         _talking = true;
+
+        int usedSampleRate = 0;
         try
         {
             _talkRecorder = _audioManager.CreateRecorder();
@@ -74,6 +79,7 @@ public sealed class VoiceCallManager : IDisposable
                     Encoding = Plugin.Maui.Audio.Encoding.Wav,
                     ThrowIfNotSupported = true
                 });
+                usedSampleRate = 16000;
             }
             catch
             {
@@ -86,13 +92,14 @@ public sealed class VoiceCallManager : IDisposable
                     Encoding = Plugin.Maui.Audio.Encoding.Wav,
                     ThrowIfNotSupported = false
                 });
+                usedSampleRate = 44100;
             }
-            Log?.Invoke("PTT: recording...");
+            Log?.Invoke($"PTT: recording at {usedSampleRate}Hz...");
         }
         catch (Exception ex)
         {
             _talking = false;
-            Log?.Invoke($"PTT record error: {ex.Message}");
+            LogError?.Invoke($"PTT record error (both sample rates failed): {ex.Message}");
         }
     }
 
@@ -113,6 +120,7 @@ public sealed class VoiceCallManager : IDisposable
                 if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                 {
                     wavBytes = await File.ReadAllBytesAsync(filePath);
+                    Log?.Invoke($"PTT: wav file read {wavBytes.Length}B from {filePath}");
                     try { File.Delete(filePath); } catch { }
                 }
             }
@@ -128,6 +136,7 @@ public sealed class VoiceCallManager : IDisposable
                         using var ms = new MemoryStream();
                         await stream.CopyToAsync(ms);
                         wavBytes = ms.ToArray();
+                        Log?.Invoke($"PTT: wav stream fallback read {wavBytes.Length}B");
                     }
                 }
                 catch (Exception ex)
@@ -139,8 +148,20 @@ public sealed class VoiceCallManager : IDisposable
             if (wavBytes == null || wavBytes.Length <= WavHelper.HeaderSize) return;
 
             var info = WavHelper.ParseWav(wavBytes);
+
+            if (info.SampleRate < 8000 || info.SampleRate > 96000)
+            {
+                Log?.Invoke($"PTT: invalid sample rate {info.SampleRate}, defaulting to 16000");
+                info = new WavHelper.WavInfo(16000, info.ChannelCount, info.BitsPerSample, info.PcmData);
+            }
+
             var pcm = info.PcmData;
-            if (pcm.Length == 0) return;
+
+            if (pcm.Length == 0)
+            {
+                LogError?.Invoke("PTT: recorded file produced 0 bytes of PCM");
+                return;
+            }
 
             Log?.Invoke($"PTT raw: rate={info.SampleRate} ch={info.ChannelCount} bits={info.BitsPerSample} pcm={pcm.Length}B");
 
@@ -158,6 +179,14 @@ public sealed class VoiceCallManager : IDisposable
                 var len = Math.Min(PcmChunkSize, pcm.Length - i);
                 var chunk = new byte[len];
                 Buffer.BlockCopy(pcm, i, chunk, 0, len);
+
+                if (!_firstFrameSent)
+                {
+                    _firstFrameSent = true;
+                    var ep = _transport.RemoteEndPoint?.ToString() ?? "unknown";
+                    Log?.Invoke($"Voice TX: first frame sent to {ep}, {chunk.Length} bytes");
+                }
+
                 await _transport.SendFrameAsync(chunk);
                 sent++;
                 if (sent % 10 == 0) await Task.Delay(1);
@@ -166,7 +195,7 @@ public sealed class VoiceCallManager : IDisposable
         }
         catch (Exception ex)
         {
-            Log?.Invoke($"PTT send error: {ex.Message}");
+            LogError?.Invoke($"PTT send error: {ex.Message}");
         }
     }
 
@@ -189,6 +218,13 @@ public sealed class VoiceCallManager : IDisposable
     private void OnFrameReceived(byte[] pcmData)
     {
         if (!_active || pcmData.Length == 0) return;
+
+        if (!_firstFrameReceived)
+        {
+            _firstFrameReceived = true;
+            Log?.Invoke($"Voice RX: first frame received, {pcmData.Length} bytes");
+        }
+
         _playbackQueue.Enqueue(pcmData);
         var count = Interlocked.Increment(ref _receivedCount);
         if (count % 10 == 1)
@@ -238,7 +274,16 @@ public sealed class VoiceCallManager : IDisposable
             {
                 var wav = WavHelper.WrapWithHeader(merged);
                 player = _audioManager.CreatePlayer(new MemoryStream(wav));
-                player.Play();
+
+                try
+                {
+                    player.Play();
+                }
+                catch (Exception ex)
+                {
+                    LogError?.Invoke($"Playback failed: {ex.Message}");
+                    continue;
+                }
 
                 var durationMs = WavHelper.EstimateDurationMs(merged.Length);
                 await Task.Delay(Math.Max(20, durationMs - 20), ct);
@@ -248,7 +293,7 @@ public sealed class VoiceCallManager : IDisposable
                     Log?.Invoke($"Voice PLAY: played={playedCount} frames={batch.Count} pcm={merged.Length}B dur={durationMs}ms");
             }
             catch (OperationCanceledException) { break; }
-            catch (Exception ex) { Log?.Invoke($"Playback error: {ex.Message}"); }
+            catch (Exception ex) { LogError?.Invoke($"Playback error: {ex.Message}"); }
             finally { try { player?.Dispose(); } catch { } }
         }
     }
