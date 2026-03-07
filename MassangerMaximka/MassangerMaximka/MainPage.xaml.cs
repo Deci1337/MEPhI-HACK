@@ -67,6 +67,7 @@ namespace MassangerMaximka
         private int _techLogCount;
         private volatile bool _suppressTechLog;
         private bool _isNarrowLayout;
+        private bool _showingChatOnMobile;
 
         public MainPage()
         {
@@ -196,20 +197,25 @@ namespace MassangerMaximka
                 if (ep != null)
                 {
                     _peerEndpointMap[nodeId] = ep;
-                    var displayName = ResolveDisplayName(nodeId);
-                    RememberPeer(displayName, ep.Address.ToString(), ep.Port);
+                    RememberPeer(ResolveDisplayName(nodeId), ep.Address.ToString(), ep.Port);
                 }
 
-                RefreshPeersList();
                 _autoConnectInFlight.Remove(nodeId);
                 var name = ResolveDisplayName(nodeId);
                 AppendChat($"[Connected] {name}", toPeer: nodeId);
-                if (ep != null)
-                    PromoteConnectedPeer(ep, nodeId);
-                else if (_activeChannelId == null)
+
+                // Auto-open chat only if the user has no active conversation yet.
+                // If already in a chat, just mark [NEW] so the current chat is not interrupted.
+                if (_activeChatPeer == null && _activeChannelId == null)
                     SwitchChat(nodeId);
+                else
+                {
+                    _unreadPeers.Add(nodeId);
+                    RefreshPeersList();
+                }
+
                 TechLog(LogCat.Network, $"TCP connected: {name} ({nodeId})" + (ep != null ? $" remote={ep}" : ""));
-                TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
+                TechLog(LogCat.Protocol, $"Hello handshake complete for {nodeId}");
             });
         }
 
@@ -231,19 +237,32 @@ namespace MassangerMaximka
             return chat;
         }
 
+        private bool _switchingChat;
         private void SwitchChat(string nodeId)
         {
-            if (nodeId == _activeChatPeer) return;
-            _activeChatPeer = nodeId;
-            _activeChannelId = null;
-            _chatItems = GetOrCreatePeerChat(nodeId);
-            ChatList.ItemsSource = _chatItems;
-            ChannelBar.IsVisible = false;
-            SelectedPeerLabel.Text = ResolveDisplayName(nodeId);
-            if (_unreadPeers.Remove(nodeId))
-                RefreshPeersList();
-            if (_chatItems.Count > 0)
-                ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
+            if (_switchingChat || nodeId == _activeChatPeer) return;
+            _switchingChat = true;
+            try
+            {
+                _activeChatPeer = nodeId;
+                _activeChannelId = null;
+                _chatItems = GetOrCreatePeerChat(nodeId);
+                ChatList.ItemsSource = _chatItems;
+                ChannelBar.IsVisible = false;
+                SelectedPeerLabel.Text = ResolveDisplayName(nodeId);
+                if (_unreadPeers.Remove(nodeId))
+                    RefreshPeersList();
+                if (_chatItems.Count > 0)
+                    ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
+
+                // On mobile: switch to chat view
+                if (_isNarrowLayout)
+                {
+                    _showingChatOnMobile = true;
+                    ApplyResponsiveLayout(Width);
+                }
+            }
+            finally { _switchingChat = false; }
         }
 
         private void OnPeerDisconnected(string nodeId)
@@ -251,13 +270,14 @@ namespace MassangerMaximka
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 var name = ResolveDisplayName(nodeId);
-                RefreshPeersList();
                 AppendChat($"[Disconnected] {name}", toPeer: nodeId);
+                AppendChat("[!] Messages cannot be delivered until reconnected.", toPeer: nodeId);
                 if (_channelMembers.Contains(nodeId))
                 {
                     _ = _channelService!.HandleMemberLeave(nodeId);
                     AppendToChannelChat($"[Channel] {name} disconnected");
                 }
+                RefreshPeersList();
                 TechLog(LogCat.Network, $"TCP disconnected: {name} ({nodeId})");
             });
         }
@@ -366,23 +386,18 @@ namespace MassangerMaximka
                 }
 
                 var senderName = ResolveDisplayName(msg.FromNodeId);
-                if (_activeChannelId != null &&
-                    _channelMembers.Contains(msg.FromNodeId))
+                if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
                 {
                     AppendToChannelChat($"{senderName}: {text}");
                 }
                 else
                 {
+                    // Always store into correct per-peer chat regardless of active chat.
                     AppendChat($"{senderName}: {text}", toPeer: msg.FromNodeId);
-                    if (_activeChatPeer != msg.FromNodeId && _activeChannelId == null)
+                    if (_activeChatPeer != msg.FromNodeId)
                     {
-                        if (_activeChatPeer == null)
-                            SwitchChat(msg.FromNodeId);
-                        else
-                        {
-                            _unreadPeers.Add(msg.FromNodeId);
-                            RefreshPeersList();
-                        }
+                        _unreadPeers.Add(msg.FromNodeId);
+                        RefreshPeersList();
                     }
                 }
                 TechLog(LogCat.Protocol, $"RECV ChatPacket id={msg.MessageId} from={msg.FromNodeId}");
@@ -589,6 +604,13 @@ namespace MassangerMaximka
             ChannelBar.IsVisible = true;
             ChannelInfoLabel.Text = $"Channel: {_channelService?.ActiveChannelId} | Members: {_channelMembers.Count}";
             RefreshPeersList();
+
+            // On mobile: switch to chat view
+            if (_isNarrowLayout)
+            {
+                _showingChatOnMobile = true;
+                ApplyResponsiveLayout(Width);
+            }
         }
 
         private void AppendToChannelChat(string text)
@@ -729,6 +751,7 @@ namespace MassangerMaximka
             var ok = await _connections.ConnectToPeerAsync(nodeId, endPoint);
             var connectedNodeId = ok ? PromoteConnectedPeer(endPoint, nodeId) : nodeId;
             AppendChat(ok ? $"[Connected] {connectedNodeId}" : $"[Failed] {nodeId}");
+            if (ok) SwitchChat(connectedNodeId);
             RefreshPeersList();
         }
 
@@ -750,7 +773,7 @@ namespace MassangerMaximka
             var ok = await _connections.ConnectToPeerAsync(nodeId, endPoint);
             var connectedNodeId = ok ? PromoteConnectedPeer(endPoint, nodeId) : nodeId;
             AppendChat(ok ? $"[Connected] {connectedNodeId}" : $"[Failed] {nodeId}");
-            if (ok) TechLog(LogCat.Encryption, $"TCP session established with {connectedNodeId}");
+            if (ok) { TechLog(LogCat.Encryption, $"TCP session established with {connectedNodeId}"); SwitchChat(connectedNodeId); }
             RefreshPeersList();
         }
 
@@ -780,6 +803,12 @@ namespace MassangerMaximka
                 AppendChat("[Error] Select a peer first");
                 return;
             }
+            if (_connections?.IsConnected(toNodeId) != true)
+            {
+                AppendChat("[Error] Peer is not connected. Double-tap the peer or press Connect first.");
+                TechLog(LogCat.Network, $"SEND blocked: {toNodeId} not connected");
+                return;
+            }
             TechLog(LogCat.Transport, $"SEND ChatPacket to={toNodeId} len={text.Length}");
             var sentMsg = await _chat.SendMessageAsync(toNodeId, text);
             var item = AppendChat($"Me: {text}", status: "Sent");
@@ -788,6 +817,15 @@ namespace MassangerMaximka
         }
 
         private void OnClearChatClicked(object? sender, EventArgs e) => _chatItems.Clear();
+
+        private void OnBackToPeersClicked(object? sender, EventArgs e)
+        {
+            if (_isNarrowLayout)
+            {
+                _showingChatOnMobile = false;
+                ApplyResponsiveLayout(Width);
+            }
+        }
 
         private async void OnSendTestFileClicked(object? sender, EventArgs e)
         {
@@ -1573,15 +1611,18 @@ namespace MassangerMaximka
             bool isOnline,
             bool isConnected)
         {
-            var parts = new List<string>();
-            if (isSaved) parts.Add("saved");
-            if (isOnline) parts.Add("online");
-            if (isConnected) parts.Add("connected");
-            if (nodeId != null && _unreadPeers.Contains(nodeId)) parts.Add("NEW");
-            var status = parts.Count == 0 ? "" : $"[{string.Join(" | ", parts)}] ";
+            string state;
+            if (isConnected)
+                state = "[OK]";
+            else if (isOnline)
+                state = "[?]";
+            else
+                state = "[saved]";
+
+            var newBadge = nodeId != null && _unreadPeers.Contains(nodeId) ? " [NEW]" : "";
             var node = string.IsNullOrWhiteSpace(nodeId) ? "" : $" ({nodeId})";
             var ep = string.IsNullOrWhiteSpace(endPoint) ? "" : $" [{endPoint}]";
-            return $"{status}{displayName}{node}{ep}";
+            return $"{state}{newBadge} {displayName}{node}{ep}";
         }
 
         private IPAddress? ResolvePeerIpAddress(string nodeId)
@@ -1647,19 +1688,26 @@ namespace MassangerMaximka
 
             if (narrow)
             {
+                // Mobile master-detail: show EITHER peers list OR chat, not both
                 RootLayout.ColumnDefinitions[0].Width = GridLength.Star;
                 RootLayout.ColumnDefinitions[1].Width = new GridLength(0);
                 Grid.SetRow(SidebarPanel, 0);
                 Grid.SetColumn(SidebarPanel, 0);
-                Grid.SetRowSpan(SidebarPanel, 1);
-                Grid.SetRow(ChatPanel, 1);
+                Grid.SetRowSpan(SidebarPanel, 2);
+                Grid.SetRow(ChatPanel, 0);
                 Grid.SetColumn(ChatPanel, 0);
-                Grid.SetRowSpan(ChatPanel, 1);
-                SidebarPanel.MaximumHeightRequest = 220;
-                PeersList.HeightRequest = 140;
+                Grid.SetRowSpan(ChatPanel, 2);
+                SidebarPanel.MaximumHeightRequest = double.PositiveInfinity;
+                PeersList.HeightRequest = -1;
+
+                // Show/hide based on navigation state
+                SidebarPanel.IsVisible = !_showingChatOnMobile;
+                ChatPanel.IsVisible = _showingChatOnMobile;
+                BackToPeersBtn.IsVisible = _showingChatOnMobile;
             }
             else
             {
+                // Desktop: show both panels side-by-side
                 RootLayout.ColumnDefinitions[0].Width = new GridLength(DeviceInfo.Idiom == DeviceIdiom.Phone ? 160 : 220);
                 RootLayout.ColumnDefinitions[1].Width = GridLength.Star;
                 Grid.SetRow(SidebarPanel, 0);
@@ -1670,6 +1718,9 @@ namespace MassangerMaximka
                 Grid.SetRowSpan(ChatPanel, 2);
                 SidebarPanel.MaximumHeightRequest = double.PositiveInfinity;
                 PeersList.HeightRequest = -1;
+                SidebarPanel.IsVisible = true;
+                ChatPanel.IsVisible = true;
+                BackToPeersBtn.IsVisible = false;
             }
 
             DiagnosticsPanel.IsVisible = !narrow;
@@ -1699,9 +1750,7 @@ namespace MassangerMaximka
             var actualNodeId = _connections?.FindPeerNodeId(endPoint) ?? fallbackNodeId;
             if (!string.Equals(actualNodeId, fallbackNodeId, StringComparison.Ordinal))
                 MergePeerIdentity(fallbackNodeId, actualNodeId);
-
             _selectedPeerNodeId = actualNodeId;
-            SwitchChat(actualNodeId);
             return actualNodeId;
         }
 
