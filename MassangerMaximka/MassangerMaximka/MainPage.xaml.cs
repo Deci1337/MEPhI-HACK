@@ -1473,11 +1473,17 @@ namespace MassangerMaximka
         private ChatItem AppendChat(string line, string? status = null, string? toPeer = null, byte[]? imageBytes = null)
         {
             var collection = !string.IsNullOrEmpty(toPeer) ? GetOrCreatePeerChat(toPeer) : _chatItems;
+            var isFromMe = line.StartsWith("Me:", StringComparison.Ordinal)
+                        || line.StartsWith("[Connected]", StringComparison.Ordinal)
+                        || line.StartsWith("[Call] Calling", StringComparison.Ordinal);
+            var isSystem = line.StartsWith("[") && !isFromMe;
             var item = new ChatItem
             {
-                Text = $"{DateTime.Now:HH:mm:ss} {line}",
+                Text = isSystem ? line : $"{DateTime.Now:HH:mm} {line}",
                 Status = status,
-                ImageBytes = imageBytes
+                ImageBytes = imageBytes,
+                IsFromMe = isFromMe,
+                IsSystem = isSystem
             };
             collection.Add(item);
             if (collection.Count > 200) collection.RemoveAt(0);
