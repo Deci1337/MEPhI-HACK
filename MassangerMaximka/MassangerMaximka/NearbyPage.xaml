@@ -1,0 +1,559 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MassangerMaximka.NearbyPage"
+             BackgroundColor="{StaticResource AppBackground}"
+             Shell.NavBarIsVisible="False">
+
+    <Grid RowDefinitions="Auto,*,72">
+
+        <!-- ═══════════════ HEADER ═══════════════ -->
+        <Grid Grid.Row="0"
+              BackgroundColor="{StaticResource AppBackground}">
+            <Grid.Padding>
+                <OnPlatform x:TypeArguments="Thickness">
+                    <On Platform="Android" Value="16,28,20,16"/>
+                    <On Platform="WinUI"   Value="16,8,20,8"/>
+                </OnPlatform>
+            </Grid.Padding>
+            <Grid.MinimumHeightRequest>
+                <OnPlatform x:TypeArguments="x:Double">
+                    <On Platform="Android" Value="84"/>
+                    <On Platform="WinUI"   Value="60"/>
+                </OnPlatform>
+            </Grid.MinimumHeightRequest>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Logo icon + Title -->
+            <HorizontalStackLayout Grid.Column="0"
+                                   Spacing="10"
+                                   VerticalOptions="Center">
+
+                <!-- Flash icon in white rounded square -->
+                <Border BackgroundColor="{StaticResource TextPrimary}"
+                        StrokeShape="RoundRectangle 10"
+                        Stroke="Transparent"
+                        HeightRequest="38"
+                        WidthRequest="38">
+                    <Label Text="⚡"
+                           FontSize="18"
+                           TextColor="{StaticResource AppBackground}"
+                           HorizontalOptions="Center"
+                           VerticalOptions="Center"/>
+                </Border>
+
+                <!-- App title -->
+                <Label Text="NEARBY RADAR"
+                       FontFamily="OpenSansSemibold"
+                       FontSize="18"
+                       FontAttributes="Bold"
+                       TextColor="{StaticResource TextPrimary}"
+                       CharacterSpacing="1.5"
+                       VerticalOptions="Center"/>
+            </HorizontalStackLayout>
+
+            <!-- Refresh icon -->
+            <Label Grid.Column="2"
+                   Text="↺"
+                   FontSize="22"
+                   TextColor="{StaticResource TextPrimary}"
+                   VerticalOptions="Center"
+                   HorizontalOptions="End"
+                   Opacity="0.8">
+                <Label.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnRefreshTapped"/>
+                </Label.GestureRecognizers>
+            </Label>
+
+        </Grid>
+
+        <!-- ═══════════════ BODY ═══════════════ -->
+        <ScrollView Grid.Row="1">
+            <VerticalStackLayout Spacing="0">
+
+                <!-- ── Searching block ── -->
+                <VerticalStackLayout Padding="0,32,0,28"
+                                     Spacing="16"
+                                     HorizontalOptions="Center">
+
+                    <!-- Concentric radar circles -->
+                    <Grid HorizontalOptions="Center"
+                          VerticalOptions="Center"
+                          HeightRequest="140"
+                          WidthRequest="140">
+
+                        <!-- Outer faint ring -->
+                        <Border HeightRequest="140"
+                                WidthRequest="140"
+                                StrokeShape="Ellipse"
+                                Stroke="#15B9D220"
+                                StrokeThickness="1"
+                                BackgroundColor="Transparent"
+                                HorizontalOptions="Center"
+                                VerticalOptions="Center"/>
+
+                        <!-- Middle ring -->
+                        <Border HeightRequest="108"
+                                WidthRequest="108"
+                                StrokeShape="Ellipse"
+                                Stroke="#15B9D233"
+                                StrokeThickness="1"
+                                BackgroundColor="Transparent"
+                                HorizontalOptions="Center"
+                                VerticalOptions="Center"/>
+
+                        <!-- Inner ring (96x96 per spec) -->
+                        <Border HeightRequest="96"
+                                WidthRequest="96"
+                                StrokeShape="Ellipse"
+                                Stroke="#15B9D266"
+                                StrokeThickness="1"
+                                BackgroundColor="{StaticResource RadarCore}"
+                                HorizontalOptions="Center"
+                                VerticalOptions="Center"/>
+
+                        <!-- Core icon -->
+                        <Border HeightRequest="56"
+                                WidthRequest="56"
+                                StrokeShape="Ellipse"
+                                Stroke="Transparent"
+                                BackgroundColor="#122420"
+                                HorizontalOptions="Center"
+                                VerticalOptions="Center">
+                            <Label Text="◎"
+                                   FontSize="26"
+                                   TextColor="{StaticResource Accent}"
+                                   HorizontalOptions="Center"
+                                   VerticalOptions="Center"/>
+                        </Border>
+
+                    </Grid>
+
+                    <!-- "SEARCHING NEARBY" -->
+                    <Label Text="SEARCHING NEARBY"
+                           FontFamily="OpenSansSemibold"
+                           FontSize="20"
+                           FontAttributes="Bold"
+                           TextColor="{StaticResource TextPrimary}"
+                           CharacterSpacing="1.0"
+                           HorizontalOptions="Center"
+                           HorizontalTextAlignment="Center"/>
+
+                    <!-- "LAN DISCOVERY PROTOCOL (UDP)" -->
+                    <Label Text="LAN DISCOVERY PROTOCOL (UDP)"
+                           FontFamily="OpenSansRegular"
+                           FontSize="14"
+                           TextColor="{StaticResource TextSubtitle}"
+                           CharacterSpacing="0.8"
+                           HorizontalOptions="Center"
+                           HorizontalTextAlignment="Center"/>
+
+                </VerticalStackLayout>
+
+                <!-- ── Discovered Devices section ── -->
+                <VerticalStackLayout Padding="16,0,16,24" Spacing="12">
+
+                    <!-- Section header -->
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,4">
+                        <Label Grid.Column="0"
+                               Text="DISCOVERED DEVICES"
+                               FontFamily="OpenSansRegular"
+                               FontSize="12"
+                               TextColor="{StaticResource TextSubtitle}"
+                               CharacterSpacing="1.2"
+                               VerticalOptions="Center"/>
+                        <Border Grid.Column="1"
+                                BackgroundColor="{StaticResource SurfaceCardAlt}"
+                                StrokeShape="RoundRectangle 6"
+                                Stroke="Transparent"
+                                Padding="8,3">
+                            <Label Text="4 Found"
+                                   FontFamily="OpenSansRegular"
+                                   FontSize="12"
+                                   TextColor="{StaticResource TextSubtitle}"/>
+                        </Border>
+                    </Grid>
+
+                    <!-- Device item: Samsung S25 -->
+                    <Border BackgroundColor="{StaticResource DeviceCardBg}"
+                            StrokeShape="RoundRectangle 12"
+                            Stroke="Transparent"
+                            Padding="12,12">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+
+                            <!-- Avatar -->
+                            <Grid Grid.Column="0"
+                                  WidthRequest="52" HeightRequest="52">
+                                <Border StrokeShape="Ellipse"
+                                        Stroke="Transparent"
+                                        HeightRequest="52" WidthRequest="52"
+                                        OverflowContent="Clip">
+                                    <Image Source="https://picsum.photos/seed/s25/52/52"
+                                           HeightRequest="52" WidthRequest="52"
+                                           Aspect="AspectFill"/>
+                                </Border>
+                                <!-- Device type badge -->
+                                <Label Text="📱" FontSize="10"
+                                       HorizontalOptions="Start" VerticalOptions="Start"
+                                       Margin="-2,-2,0,0"/>
+                                <!-- Online dot -->
+                                <Border StrokeShape="Ellipse"
+                                        BackgroundColor="{StaticResource Accent}"
+                                        Stroke="Transparent"
+                                        HeightRequest="10" WidthRequest="10"
+                                        HorizontalOptions="End" VerticalOptions="End"/>
+                            </Grid>
+
+                            <!-- Info -->
+                            <VerticalStackLayout Grid.Column="1"
+                                                 Spacing="4"
+                                                 VerticalOptions="Center">
+                                <HorizontalStackLayout Spacing="6">
+                                    <Label Text="Samsung S25"
+                                           FontFamily="OpenSansSemibold"
+                                           FontSize="15"
+                                           FontAttributes="Bold"
+                                           TextColor="{StaticResource TextPrimary}"
+                                           VerticalOptions="Center"/>
+                                    <Label Text="▐▐▐" FontSize="10"
+                                           TextColor="{StaticResource Accent}"
+                                           VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout Spacing="8">
+                                    <Label Text="📶 0.8m away"
+                                           FontFamily="OpenSansRegular"
+                                           FontSize="12"
+                                           TextColor="{StaticResource TextSecondary}"/>
+                                    <Label Text="Ready"
+                                           FontFamily="OpenSansRegular"
+                                           FontSize="12"
+                                           TextColor="{StaticResource StatusReady}"/>
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+
+                            <!-- Connect button -->
+                            <Border Grid.Column="2"
+                                    BackgroundColor="{StaticResource ConnectBtnBg}"
+                                    StrokeShape="RoundRectangle 10"
+                                    Stroke="Transparent"
+                                    HeightRequest="40"
+                                    WidthRequest="98"
+                                    VerticalOptions="Center">
+                                <Label Text="Connect"
+                                       FontFamily="OpenSansSemibold"
+                                       FontSize="14"
+                                       FontAttributes="Bold"
+                                       TextColor="{StaticResource ConnectBtnText}"
+                                       HorizontalOptions="Center"
+                                       VerticalOptions="Center">
+                                    <Label.GestureRecognizers>
+                                        <TapGestureRecognizer Tapped="OnConnectTapped" CommandParameter="Samsung S25"/>
+                                    </Label.GestureRecognizers>
+                                </Label>
+                            </Border>
+
+                        </Grid>
+                    </Border>
+
+                    <!-- Device item: Lenovo Ultra -->
+                    <Border BackgroundColor="{StaticResource DeviceCardBg}"
+                            StrokeShape="RoundRectangle 12"
+                            Stroke="Transparent"
+                            Padding="12,12">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                            <Grid Grid.Column="0" WidthRequest="52" HeightRequest="52">
+                                <Border StrokeShape="Ellipse" Stroke="Transparent"
+                                        HeightRequest="52" WidthRequest="52"
+                                        OverflowContent="Clip">
+                                    <Image Source="https://picsum.photos/seed/lenovo/52/52"
+                                           HeightRequest="52" WidthRequest="52"
+                                           Aspect="AspectFill"/>
+                                </Border>
+                                <Label Text="💻" FontSize="10"
+                                       HorizontalOptions="Start" VerticalOptions="Start"
+                                       Margin="-2,-2,0,0"/>
+                                <Border StrokeShape="Ellipse"
+                                        BackgroundColor="{StaticResource Accent}"
+                                        Stroke="Transparent"
+                                        HeightRequest="10" WidthRequest="10"
+                                        HorizontalOptions="End" VerticalOptions="End"/>
+                            </Grid>
+                            <VerticalStackLayout Grid.Column="1" Spacing="4" VerticalOptions="Center">
+                                <HorizontalStackLayout Spacing="6">
+                                    <Label Text="Lenovo Ultra – Wor…"
+                                           FontFamily="OpenSansSemibold"
+                                           FontSize="15" FontAttributes="Bold"
+                                           TextColor="{StaticResource TextPrimary}"
+                                           VerticalOptions="Center"/>
+                                    <Label Text="▐▐▐" FontSize="10"
+                                           TextColor="{StaticResource Accent}"
+                                           VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout Spacing="8">
+                                    <Label Text="📶 2.4m away" FontSize="12"
+                                           TextColor="{StaticResource TextSecondary}"/>
+                                    <Label Text="Ready" FontSize="12"
+                                           TextColor="{StaticResource StatusReady}"/>
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+                            <Border Grid.Column="2"
+                                    BackgroundColor="{StaticResource ConnectBtnBg}"
+                                    StrokeShape="RoundRectangle 10"
+                                    Stroke="Transparent"
+                                    HeightRequest="40" WidthRequest="98"
+                                    VerticalOptions="Center">
+                                <Label Text="Connect"
+                                       FontFamily="OpenSansSemibold"
+                                       FontSize="14" FontAttributes="Bold"
+                                       TextColor="{StaticResource ConnectBtnText}"
+                                       HorizontalOptions="Center"
+                                       VerticalOptions="Center">
+                                    <Label.GestureRecognizers>
+                                        <TapGestureRecognizer Tapped="OnConnectTapped" CommandParameter="Lenovo Ultra"/>
+                                    </Label.GestureRecognizers>
+                                </Label>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- Device item: Pixel 8 (Busy) -->
+                    <Border BackgroundColor="{StaticResource DeviceCardBg}"
+                            StrokeShape="RoundRectangle 12"
+                            Stroke="Transparent"
+                            Padding="12,12">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                            <Grid Grid.Column="0" WidthRequest="52" HeightRequest="52">
+                                <Border StrokeShape="Ellipse" Stroke="Transparent"
+                                        HeightRequest="52" WidthRequest="52"
+                                        OverflowContent="Clip">
+                                    <Image Source="https://picsum.photos/seed/pixel8/52/52"
+                                           HeightRequest="52" WidthRequest="52"
+                                           Aspect="AspectFill"/>
+                                </Border>
+                                <Label Text="📱" FontSize="10"
+                                       HorizontalOptions="Start" VerticalOptions="Start"
+                                       Margin="-2,-2,0,0"/>
+                                <Border StrokeShape="Ellipse"
+                                        BackgroundColor="{StaticResource StatusBusy}"
+                                        Stroke="Transparent"
+                                        HeightRequest="10" WidthRequest="10"
+                                        HorizontalOptions="End" VerticalOptions="End"/>
+                            </Grid>
+                            <VerticalStackLayout Grid.Column="1" Spacing="4" VerticalOptions="Center">
+                                <HorizontalStackLayout Spacing="6">
+                                    <Label Text="Pixel 8 – Marcus"
+                                           FontFamily="OpenSansSemibold"
+                                           FontSize="15" FontAttributes="Bold"
+                                           TextColor="{StaticResource TextPrimary}"
+                                           VerticalOptions="Center"/>
+                                    <Label Text="▐▐▐" FontSize="10"
+                                           TextColor="{StaticResource Accent}"
+                                           VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout Spacing="8">
+                                    <Label Text="📶 3.2m away" FontSize="12"
+                                           TextColor="{StaticResource TextSecondary}"/>
+                                    <Label Text="Busy" FontSize="12"
+                                           TextColor="{StaticResource StatusBusy}"/>
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+                            <Border Grid.Column="2"
+                                    BackgroundColor="{StaticResource ConnectBtnBg}"
+                                    StrokeShape="RoundRectangle 10"
+                                    Stroke="Transparent"
+                                    HeightRequest="40" WidthRequest="98"
+                                    VerticalOptions="Center">
+                                <Label Text="Connect"
+                                       FontFamily="OpenSansSemibold"
+                                       FontSize="14" FontAttributes="Bold"
+                                       TextColor="{StaticResource ConnectBtnText}"
+                                       HorizontalOptions="Center"
+                                       VerticalOptions="Center">
+                                    <Label.GestureRecognizers>
+                                        <TapGestureRecognizer Tapped="OnConnectTapped" CommandParameter="Pixel 8"/>
+                                    </Label.GestureRecognizers>
+                                </Label>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- Device item: Poco Studio -->
+                    <Border BackgroundColor="{StaticResource DeviceCardBg}"
+                            StrokeShape="RoundRectangle 12"
+                            Stroke="Transparent"
+                            Padding="12,12">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                            <Grid Grid.Column="0" WidthRequest="52" HeightRequest="52">
+                                <Border StrokeShape="Ellipse" Stroke="Transparent"
+                                        HeightRequest="52" WidthRequest="52"
+                                        OverflowContent="Clip">
+                                    <Image Source="https://picsum.photos/seed/poco/52/52"
+                                           HeightRequest="52" WidthRequest="52"
+                                           Aspect="AspectFill"/>
+                                </Border>
+                                <Label Text="📱" FontSize="10"
+                                       HorizontalOptions="Start" VerticalOptions="Start"
+                                       Margin="-2,-2,0,0"/>
+                                <Border StrokeShape="Ellipse"
+                                        BackgroundColor="{StaticResource Accent}"
+                                        Stroke="Transparent"
+                                        HeightRequest="10" WidthRequest="10"
+                                        HorizontalOptions="End" VerticalOptions="End"/>
+                            </Grid>
+                            <VerticalStackLayout Grid.Column="1" Spacing="4" VerticalOptions="Center">
+                                <HorizontalStackLayout Spacing="6">
+                                    <Label Text="Poco – Studio"
+                                           FontFamily="OpenSansSemibold"
+                                           FontSize="15" FontAttributes="Bold"
+                                           TextColor="{StaticResource TextPrimary}"
+                                           VerticalOptions="Center"/>
+                                    <Label Text="▐▐▐" FontSize="10"
+                                           TextColor="{StaticResource Accent}"
+                                           VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout Spacing="8">
+                                    <Label Text="📶 5.1m away" FontSize="12"
+                                           TextColor="{StaticResource TextSecondary}"/>
+                                    <Label Text="Ready" FontSize="12"
+                                           TextColor="{StaticResource StatusReady}"/>
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+                            <Border Grid.Column="2"
+                                    BackgroundColor="{StaticResource ConnectBtnBg}"
+                                    StrokeShape="RoundRectangle 10"
+                                    Stroke="Transparent"
+                                    HeightRequest="40" WidthRequest="98"
+                                    VerticalOptions="Center">
+                                <Label Text="Connect"
+                                       FontFamily="OpenSansSemibold"
+                                       FontSize="14" FontAttributes="Bold"
+                                       TextColor="{StaticResource ConnectBtnText}"
+                                       HorizontalOptions="Center"
+                                       VerticalOptions="Center">
+                                    <Label.GestureRecognizers>
+                                        <TapGestureRecognizer Tapped="OnConnectTapped" CommandParameter="Poco Studio"/>
+                                    </Label.GestureRecognizers>
+                                </Label>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                <!-- ── Instant Pairing block ── -->
+                <Border Margin="16,0,16,28"
+                        BackgroundColor="#0D3F39"
+                        Opacity="0.95"
+                        StrokeShape="RoundRectangle 12"
+                        Stroke="#15B9D240"
+                        StrokeThickness="1"
+                        Padding="16,16">
+                    <Grid ColumnDefinitions="28,*" ColumnSpacing="10">
+                        <!-- Zap icon -->
+                        <Label Grid.Column="0"
+                               Text="⚡"
+                               FontSize="20"
+                               TextColor="#15B9D2"
+                               VerticalOptions="Start"
+                               HorizontalOptions="Center"
+                               Margin="0,1,0,0"/>
+                        <!-- Text block -->
+                        <VerticalStackLayout Grid.Column="1" Spacing="4">
+                            <Label Text="Instant Pairing"
+                                   FontFamily="OpenSansSemibold"
+                                   FontSize="14"
+                                   FontAttributes="Bold"
+                                   TextColor="#15B9D2"/>
+                            <Label Text="Connect instantly to peers within 10 meters. Transfers are encrypted and don't consume cellular data."
+                                   FontFamily="OpenSansRegular"
+                                   FontSize="14"
+                                   LineHeight="1.5"
+                                   TextColor="{StaticResource TextSubtitle}"/>
+                        </VerticalStackLayout>
+                    </Grid>
+                </Border>
+
+            </VerticalStackLayout>
+        </ScrollView>
+
+        <!-- ═══════════════ FOOTER / TAB BAR ═══════════════ -->
+        <Grid Grid.Row="2"
+              BackgroundColor="{StaticResource TabBarBg}"
+              ColumnDefinitions="*,*,*">
+
+            <!-- Nearby (active) -->
+            <VerticalStackLayout Grid.Column="0"
+                                 Spacing="4"
+                                 Padding="0,10,0,10"
+                                 HorizontalOptions="Center"
+                                 VerticalOptions="Center">
+                <Label Text="⬡"
+                       FontSize="22"
+                       TextColor="{StaticResource TabActive}"
+                       HorizontalOptions="Center"/>
+                <Label Text="Nearby"
+                       FontFamily="OpenSansRegular"
+                       FontSize="10"
+                       TextColor="{StaticResource TabActive}"
+                       HorizontalOptions="Center"/>
+            </VerticalStackLayout>
+
+            <!-- Chats (with badge) -->
+            <VerticalStackLayout Grid.Column="1"
+                                 Spacing="4"
+                                 Padding="0,10,0,10"
+                                 HorizontalOptions="Center"
+                                 VerticalOptions="Center">
+                <Grid HorizontalOptions="Center" WidthRequest="32" HeightRequest="26">
+                    <Label Text="▣"
+                           FontSize="22"
+                           TextColor="{StaticResource TabInactive}"
+                           HorizontalOptions="Center"
+                           VerticalOptions="Center"/>
+                    <!-- Badge -->
+                    <Border BackgroundColor="{StaticResource BadgeRed}"
+                            StrokeShape="Ellipse"
+                            Stroke="Transparent"
+                            HeightRequest="16"
+                            WidthRequest="16"
+                            HorizontalOptions="End"
+                            VerticalOptions="Start">
+                        <Label Text="8"
+                               FontSize="9"
+                               FontAttributes="Bold"
+                               TextColor="White"
+                               HorizontalOptions="Center"
+                               VerticalOptions="Center"/>
+                    </Border>
+                </Grid>
+                <Label Text="Chats"
+                       FontFamily="OpenSansRegular"
+                       FontSize="10"
+                       TextColor="{StaticResource TabInactive}"
+                       HorizontalOptions="Center"/>
+            </VerticalStackLayout>
+
+            <!-- Files -->
+            <VerticalStackLayout Grid.Column="2"
+                                 Spacing="4"
+                                 Padding="0,10,0,10"
+                                 HorizontalOptions="Center"
+                                 VerticalOptions="Center">
+                <Label Text="▭"
+                       FontSize="22"
+                       TextColor="{StaticResource TabInactive}"
+                       HorizontalOptions="Center"/>
+                <Label Text="Files"
+                       FontFamily="OpenSansRegular"
+                       FontSize="10"
+                       TextColor="{StaticResource TabInactive}"
+                       HorizontalOptions="Center"/>
+            </VerticalStackLayout>
+
+        </Grid>
+
+    </Grid>
+
+</ContentPage>
