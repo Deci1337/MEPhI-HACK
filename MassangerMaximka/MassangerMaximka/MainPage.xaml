@@ -2,19 +2,29 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:local="clr-namespace:MassangerMaximka"
+             xmlns:conv="clr-namespace:MassangerMaximka.Converters"
              x:Class="MassangerMaximka.MainPage"
              Title="PHOTON"
              BackgroundColor="{StaticResource Coal}">
 
-    <!-- Two-column on Desktop, stacked on Phone -->
-    <Grid ColumnSpacing="0" RowSpacing="0">
+    <ContentPage.Resources>
+        <ResourceDictionary>
+            <conv:ByteArrayToImageSourceConverter x:Key="ByteArrayToImageSourceConverter" />
+        </ResourceDictionary>
+    </ContentPage.Resources>
+
+    <Grid x:Name="RootLayout" ColumnSpacing="0" RowSpacing="0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="{OnIdiom Phone=100, Default=220}" />
+            <ColumnDefinition Width="{OnIdiom Phone=140, Default=220}" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
         <!-- ====== LEFT: Peers sidebar ====== -->
-        <Grid Grid.Column="0" BackgroundColor="{StaticResource CoalPanel}"
+        <Grid x:Name="SidebarPanel" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" BackgroundColor="{StaticResource CoalPanel}"
               RowDefinitions="Auto,Auto,*,Auto" RowSpacing="0">
 
             <!-- Sidebar header -->
@@ -38,13 +48,13 @@
                             SelectionChanged="OnPeerSelected">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="x:String">
-                        <Grid Padding="{OnIdiom Phone='6,8', Default='10,10'}" BackgroundColor="Transparent">
-                            <Grid.GestureRecognizers>
-                                <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
-                            </Grid.GestureRecognizers>
-                            <Label Text="{Binding}" FontSize="{OnIdiom Phone=10, Default=12}"
+                        <Grid Padding="{OnIdiom Phone='8,10', Default='10,10'}"
+                              BackgroundColor="Transparent"
+                              MinimumHeightRequest="{OnIdiom Phone=44, Default=36}">
+                            <Label Text="{Binding}" FontSize="{OnIdiom Phone=11, Default=12}"
                                    TextColor="{StaticResource SeaShell}"
-                                   LineBreakMode="TailTruncation" />
+                                   LineBreakMode="TailTruncation"
+                                   VerticalOptions="Center" />
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
@@ -68,19 +78,23 @@
                             TextColor="{StaticResource SeaShell}"
                             FontSize="{OnIdiom Phone=9, Default=10}" Padding="0,6" CornerRadius="3" />
                 </Grid>
+                <Button Text="+ Channel" Clicked="OnCreateChannelClicked"
+                        BackgroundColor="#1A3A1A"
+                        TextColor="#88CC88"
+                        FontSize="{OnIdiom Phone=9, Default=10}" Padding="0,6" CornerRadius="3" />
             </StackLayout>
         </Grid>
 
         <!-- Vertical divider -->
-        <BoxView Grid.Column="0" WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="End" />
+        <BoxView x:Name="SidebarDivider" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="End" />
 
         <!-- ====== RIGHT: Chat panel ====== -->
-        <Grid Grid.Column="1" BackgroundColor="{StaticResource Coal}"
-              RowDefinitions="Auto,Auto,3*,Auto,Auto,2*" RowSpacing="0">
+        <Grid x:Name="ChatPanel" Grid.Column="1" Grid.Row="0" Grid.RowSpan="2" BackgroundColor="{StaticResource Coal}"
+              RowDefinitions="Auto,Auto,Auto,3*,Auto,Auto,2*" RowSpacing="0">
 
             <!-- Chat header: selected peer + call controls -->
             <Grid Grid.Row="0" Padding="12,9,8,9"
-                  ColumnDefinitions="*,Auto,Auto,Auto"
+                  ColumnDefinitions="*,Auto,Auto,Auto,Auto"
                   ColumnSpacing="6"
                   BackgroundColor="{StaticResource CoalPanel}">
                 <StackLayout Grid.Column="0" Spacing="1" VerticalOptions="Center">
@@ -95,12 +109,18 @@
                         BackgroundColor="{StaticResource DangerRed}"
                         TextColor="{StaticResource SeaShell}"
                         FontSize="10" Padding="8,4" CornerRadius="3" />
-                <Button Grid.Column="2" Text="STOP"
+                <Button Grid.Column="2" x:Name="StopSendBtn" Text="STOP"
                         Clicked="OnStopSendVoiceClicked"
                         BackgroundColor="{StaticResource CoalSurface}"
                         TextColor="{StaticResource SeaShell}"
                         FontSize="10" Padding="8,4" CornerRadius="3" />
-                <Button Grid.Column="3" x:Name="CallBtn" Text="Call"
+                <Button Grid.Column="3" x:Name="PttBtn" Text="Talk"
+                        IsVisible="False"
+                        Pressed="OnPttPressed" Released="OnPttReleased"
+                        BackgroundColor="{StaticResource AccentBlue}"
+                        TextColor="{StaticResource SeaShell}"
+                        FontSize="10" Padding="14,4" CornerRadius="3" />
+                <Button Grid.Column="4" x:Name="CallBtn" Text="Call"
                         Clicked="OnCallButtonClicked"
                         BackgroundColor="{StaticResource SuccessGreen}"
                         TextColor="{StaticResource SeaShell}"
@@ -108,8 +128,30 @@
             </Grid>
             <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
 
+            <!-- Channel status bar (visible when in a channel) -->
+            <Grid Grid.Row="1" x:Name="ChannelBar" IsVisible="False"
+                  BackgroundColor="#0D1F0D" Padding="10,5,10,5"
+                  ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                <StackLayout Grid.Column="0" Spacing="1" VerticalOptions="Center">
+                    <Label x:Name="ChannelInfoLabel"
+                           Text="Channel: — | Members: 0"
+                           TextColor="#88CC88" FontSize="11" />
+                    <Label x:Name="ChannelPttLabel" IsVisible="False"
+                           TextColor="#FF9800" FontSize="11" FontAttributes="Bold" />
+                </StackLayout>
+                <Button Grid.Column="1" Text="Invite+" Clicked="OnInviteToChannelClicked"
+                        BackgroundColor="#1A3A1A"
+                        TextColor="#88CC88"
+                        FontSize="9" Padding="8,3" CornerRadius="3" />
+                <Button Grid.Column="2" x:Name="LeaveChannelBtn" Text="Leave"
+                        Clicked="OnLeaveChannelClicked"
+                        BackgroundColor="{StaticResource DangerRed}"
+                        TextColor="{StaticResource SeaShell}"
+                        FontSize="9" Padding="8,3" CornerRadius="3" />
+            </Grid>
+
             <!-- Incoming call banner -->
-            <Frame Grid.Row="1" x:Name="IncomingCallBanner" IsVisible="False"
+            <Frame Grid.Row="2" x:Name="IncomingCallBanner" IsVisible="False"
                    BackgroundColor="#182A1A" BorderColor="{StaticResource SuccessGreen}"
                    Padding="10,6" CornerRadius="0" Margin="0">
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
@@ -126,16 +168,21 @@
             </Frame>
 
             <!-- Chat messages -->
-            <CollectionView Grid.Row="2" x:Name="ChatList" Margin="10,6,10,6">
+            <CollectionView Grid.Row="3" x:Name="ChatList" Margin="10,6,10,6">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="local:ChatItem">
                         <Grid Padding="2,3">
                             <!-- Text message -->
-                            <Label Text="{Binding Text}"
-                                   IsVisible="{Binding IsText}"
-                                   LineBreakMode="WordWrap"
-                                   FontSize="{OnIdiom Phone=12, Default=13}"
-                                   TextColor="{StaticResource SeaShell}" />
+                            <Grid IsVisible="{Binding IsText}" ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                                <Label Grid.Column="0" Text="{Binding Text}"
+                                       LineBreakMode="WordWrap"
+                                       FontSize="{OnIdiom Phone=12, Default=13}"
+                                       TextColor="{StaticResource SeaShell}" />
+                                <Label Grid.Column="1" Text="{Binding Status}"
+                                       IsVisible="{Binding HasStatus}"
+                                       FontSize="9" TextColor="{StaticResource SeaShellMuted}"
+                                       VerticalOptions="End" />
+                            </Grid>
                             <!-- Voice message -->
                             <Grid IsVisible="{Binding IsVoice}"
                                   ColumnDefinitions="Auto,*" ColumnSpacing="8">
@@ -149,37 +196,87 @@
                                        FontSize="11" TextColor="{StaticResource SeaShellMuted}"
                                        VerticalOptions="Center" LineBreakMode="TailTruncation" />
                             </Grid>
+                            <!-- Image message -->
+                            <Grid IsVisible="{Binding IsImage}" RowDefinitions="Auto,Auto" RowSpacing="4">
+                                <Label Grid.Row="0" Text="{Binding Text}"
+                                       FontSize="11" TextColor="{StaticResource SeaShellMuted}"
+                                       LineBreakMode="TailTruncation" />
+                                <Image Grid.Row="1"
+                                       Source="{Binding ImageBytes, Converter={StaticResource ByteArrayToImageSourceConverter}}"
+                                       HeightRequest="200"
+                                       WidthRequest="200"
+                                       Aspect="AspectFill" />
+                            </Grid>
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
             </CollectionView>
 
             <!-- Message input bar -->
-            <Grid Grid.Row="3" Padding="8,6" ColumnDefinitions="Auto,*,Auto,Auto"
+            <Grid x:Name="MessageBarWide" Grid.Row="4" Padding="8,6" ColumnDefinitions="Auto,Auto,*,Auto,Auto"
                   ColumnSpacing="6" BackgroundColor="{StaticResource CoalPanel}">
-                <BoxView Grid.ColumnSpan="4" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
+                <BoxView Grid.ColumnSpan="5" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
                 <Button Grid.Column="0" Text="File" Clicked="OnSendTestFileClicked"
                         BackgroundColor="{StaticResource CoalSurface}"
                         TextColor="{StaticResource SeaShellMuted}"
                         FontSize="10" Padding="10,6" CornerRadius="3" />
-                <Entry Grid.Column="1" x:Name="MessageEntry" Placeholder="Message..."
+                <Button Grid.Column="1" Text="Photo" Clicked="OnSendPhotoClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        FontSize="10" Padding="10,6" CornerRadius="3" />
+                <Entry Grid.Column="2" x:Name="MessageEntry" Placeholder="Message..."
                        BackgroundColor="{StaticResource CoalInput}"
                        TextColor="{StaticResource SeaShell}"
                        PlaceholderColor="{StaticResource SeaShellMuted}"
                        FontSize="{OnIdiom Phone=12, Default=13}" />
-                <Button Grid.Column="2" Text="X" Clicked="OnClearChatClicked"
+                <Button Grid.Column="3" Text="X" Clicked="OnClearChatClicked"
                         BackgroundColor="{StaticResource CoalSurface}"
                         TextColor="{StaticResource SeaShellMuted}"
                         FontSize="10" Padding="8,6" CornerRadius="3" />
-                <Button Grid.Column="3" Text="Send" Clicked="OnSendClicked"
+                <Button Grid.Column="4" Text="Send" Clicked="OnSendClicked"
                         BackgroundColor="{StaticResource AccentBlue}"
                         TextColor="{StaticResource SeaShell}"
                         FontSize="{OnIdiom Phone=11, Default=12}"
                         Padding="14,6" CornerRadius="3" />
             </Grid>
 
+            <VerticalStackLayout x:Name="MessageBarNarrow" Grid.Row="4" IsVisible="False"
+                                 Padding="8,6" Spacing="6" BackgroundColor="{StaticResource CoalPanel}">
+                <BoxView HeightRequest="1" Color="{StaticResource CoalBorder}" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                    <Entry Grid.Column="0" x:Name="MessageEntryNarrow" Placeholder="Message..."
+                           BackgroundColor="{StaticResource CoalInput}"
+                           TextColor="{StaticResource SeaShell}"
+                           PlaceholderColor="{StaticResource SeaShellMuted}"
+                           FontSize="14"
+                           Completed="OnSendClicked" />
+                    <Button Grid.Column="1" Text="Send" Clicked="OnSendClicked"
+                            BackgroundColor="{StaticResource AccentBlue}"
+                            TextColor="{StaticResource SeaShell}"
+                            FontSize="12"
+                            Padding="14,10" CornerRadius="3" />
+                </Grid>
+                <HorizontalStackLayout Spacing="6">
+                    <Button Text="File" Clicked="OnSendTestFileClicked"
+                            HorizontalOptions="Start"
+                            BackgroundColor="{StaticResource CoalSurface}"
+                            TextColor="{StaticResource SeaShellMuted}"
+                            FontSize="12" Padding="12,8" CornerRadius="3" />
+                    <Button Text="Photo" Clicked="OnSendPhotoClicked"
+                            HorizontalOptions="Start"
+                            BackgroundColor="{StaticResource CoalSurface}"
+                            TextColor="{StaticResource SeaShellMuted}"
+                            FontSize="12" Padding="12,8" CornerRadius="3" />
+                    <Button Text="Clear" Clicked="OnClearChatClicked"
+                            HorizontalOptions="Start"
+                            BackgroundColor="{StaticResource CoalSurface}"
+                            TextColor="{StaticResource SeaShellMuted}"
+                            FontSize="12" Padding="12,8" CornerRadius="3" />
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+
             <!-- File transfer status row -->
-            <Grid Grid.Row="4" Padding="10,4,8,4"
+            <Grid x:Name="FileStatusBar" Grid.Row="5" Padding="10,4,8,4"
                   ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="4"
                   BackgroundColor="{StaticResource CoalPanel}">
                 <Label Grid.Column="0" x:Name="FileTransferLabel" Text="File: idle"
@@ -200,10 +297,34 @@
                         FontSize="9" Padding="6,2" CornerRadius="3" />
             </Grid>
 
-            <!-- Technical logs -->
-            <Grid Grid.Row="5" RowDefinitions="Auto,*" BackgroundColor="{StaticResource CoalPanel}">
+            <!-- Technical logs + Metrics bar -->
+            <Grid x:Name="DiagnosticsPanel" Grid.Row="6" RowDefinitions="Auto,Auto,*" BackgroundColor="{StaticResource CoalPanel}">
                 <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" />
-                <ScrollView Grid.Row="1" x:Name="TechLogScrollView" Padding="10,6">
+                <!-- Metrics bar -->
+                <Grid Grid.Row="1" Padding="10,5,10,5" ColumnDefinitions="*,*,*,*" ColumnSpacing="6"
+                      BackgroundColor="{StaticResource CoalPanel}">
+                    <StackLayout Grid.Column="0" Spacing="1">
+                        <Label Text="RTT" FontSize="8" TextColor="{StaticResource SeaShellMuted}" />
+                        <Label x:Name="MetricRttLabel" Text="--" FontSize="11"
+                               FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                    </StackLayout>
+                    <StackLayout Grid.Column="1" Spacing="1">
+                        <Label Text="LOSS" FontSize="8" TextColor="{StaticResource SeaShellMuted}" />
+                        <Label x:Name="MetricLossLabel" Text="--" FontSize="11"
+                               FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                    </StackLayout>
+                    <StackLayout Grid.Column="2" Spacing="1">
+                        <Label Text="QUALITY" FontSize="8" TextColor="{StaticResource SeaShellMuted}" />
+                        <Label x:Name="MetricQualityLabel" Text="--" FontSize="11"
+                               FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                    </StackLayout>
+                    <StackLayout Grid.Column="3" Spacing="1">
+                        <Label Text="RETRIES" FontSize="8" TextColor="{StaticResource SeaShellMuted}" />
+                        <Label x:Name="MetricRetriesLabel" Text="--" FontSize="11"
+                               FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                    </StackLayout>
+                </Grid>
+                <ScrollView Grid.Row="2" x:Name="TechLogScrollView" Padding="10,6">
                     <VerticalStackLayout x:Name="TechLogStack" Spacing="1" />
                 </ScrollView>
             </Grid>

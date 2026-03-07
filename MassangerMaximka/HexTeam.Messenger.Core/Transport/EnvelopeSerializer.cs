@@ -47,6 +47,12 @@ public static class EnvelopeSerializer
         await stream.FlushAsync(ct);
     }
 
+    internal static byte[] SerializeToJson(TransportEnvelope envelope) =>
+        JsonSerializer.SerializeToUtf8Bytes(envelope, Options);
+
+    internal static TransportEnvelope? DeserializeFromJson(byte[] json) =>
+        JsonSerializer.Deserialize<TransportEnvelope>(json, Options);
+
     private static async Task<int> ReadExactAsync(Stream stream, byte[] buffer, int offset, int count, CancellationToken ct)
     {
         var totalRead = 0;

@@ -17,6 +17,24 @@ public static class WavHelper
     public static byte[] StripHeader(byte[] wavData)
     {
         if (wavData.Length <= HeaderSize) return wavData;
+
+        // Android WAV files may contain extra chunks (fact, LIST) before 'data'.
+        // Parse RIFF structure to find the actual data chunk offset.
+        if (wavData.Length > 12
+            && wavData[0] == 'R' && wavData[1] == 'I'
+            && wavData[2] == 'F' && wavData[3] == 'F')
+        {
+            int pos = 12; // skip RIFF header + WAVE id
+            while (pos + 8 <= wavData.Length)
+            {
+                var chunkId = System.Text.Encoding.ASCII.GetString(wavData, pos, 4);
+                int chunkSize = BitConverter.ToInt32(wavData, pos + 4);
+                if (chunkId == "data")
+                    return wavData[(pos + 8)..Math.Min(pos + 8 + chunkSize, wavData.Length)];
+                pos += 8 + chunkSize;
+                if (chunkSize % 2 != 0) pos++; // RIFF chunks are word-aligned
+            }
+        }
         return wavData[HeaderSize..];
     }
 

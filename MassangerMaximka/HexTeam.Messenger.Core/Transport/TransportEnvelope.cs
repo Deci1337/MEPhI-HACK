@@ -24,10 +24,17 @@ public enum TransportPacketType : byte
     FileChunkAck = 12,
     FileComplete = 13,
     FileResumeRequest = 14,
+    Image = 15,
     VoiceFrame = 20,
     Relay = 30,
     Discovery = 40,
     Disconnect = 50,
     Inventory = 60,
-    MissingRequest = 61
+    MissingRequest = 61,
+    ChannelInvite = 70,
+    ChannelJoin = 71,
+    ChannelLeave = 72,
+    ChannelMembers = 73,
+    ChannelPtt = 74,
+    KeyExchange = 100
 }

@@ -7,6 +7,7 @@ using HexTeam.Messenger.Core.Discovery;
 using HexTeam.Messenger.Core.FileTransfer;
 using HexTeam.Messenger.Core.Models;
 using HexTeam.Messenger.Core.Metrics;
+using HexTeam.Messenger.Core.Services;
 using HexTeam.Messenger.Core.Transport;
 using HexTeam.Messenger.Core.Voice;
 using Plugin.Maui.Audio;
@@ -41,18 +42,31 @@ namespace MassangerMaximka
         private IPAddress? _incomingCallerIp;
         private int _incomingCallerVoicePort;
         private VoiceCallManager? _voiceCallManager;
+        private ChannelService? _channelService;
+        private ObservableCollection<ChatItem>? _channelChat;
+        private string? _activeChannelId;
+        private List<string> _channelMembers = [];
+        private string? _activeChannelName;
 
         private const string CallRequestPrefix = "\x1FCALL_REQUEST:";
         private const string CallAcceptPrefix = "\x1FCALL_ACCEPT:";
         private const string CallAcceptLegacy = "\x1FCALL_ACCEPT";
         private const string CallReject = "\x1FCALL_REJECT";
         private const string CallEnd = "\x1FCALL_END";
+        private const string PttStartSignal = "\x1FPTT_START";
+        private const string PttEndSignal = "\x1FPTT_END";
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
-        private readonly ObservableCollection<ChatItem> _chatItems = [];
+        private ObservableCollection<ChatItem> _chatItems = [];
+        private readonly Dictionary<string, ObservableCollection<ChatItem>> _peerChats = new();
+        private string? _activeChatPeer;
+        private readonly Dictionary<string, ChatItem> _pendingItems = new();
         private readonly Dictionary<string, System.Net.IPEndPoint> _peerEndpointMap = new();
+        private readonly Dictionary<string, int> _peerVoicePortMap = new();
+        private readonly HashSet<string> _unreadPeers = new();
         private int _techLogCount;
         private volatile bool _suppressTechLog;
+        private bool _isNarrowLayout;
 
         public MainPage()
         {
@@ -60,6 +74,7 @@ namespace MassangerMaximka
             PeersList.ItemsSource = _peers;
             ChatList.ItemsSource = _chatItems;
             LoadSavedPeers();
+            SizeChanged += (_, _) => ApplyResponsiveLayout(Width);
         }
 
         protected override void OnAppearing()
@@ -94,10 +109,17 @@ namespace MassangerMaximka
             _connections.PeerDisconnected += OnPeerDisconnected;
             _connections.EnvelopeReceived += OnEnvelopeReceivedLog;
             _chat.MessageReceived += OnMessageReceived;
+            _chat.ImageReceived += OnImageReceived;
             _chat.DeliveryStatusChanged += OnDeliveryStatusChanged;
             _files.TransferProgressChanged += OnTransferProgressChanged;
             _files.FileReceived += OnFileReceived;
             if (_metrics != null) _metrics.MetricsUpdated += OnMetricsUpdated;
+            _channelService = services.GetService<ChannelService>();
+            if (_channelService != null)
+            {
+                _channelService.InviteReceived += OnChannelInviteReceived;
+                _channelService.MembersUpdated += OnChannelMembersUpdated;
+            }
 
             StatusLabel.Text = $"TCP: {_connections.ListenPort} | NodeId: {config?.NodeId ?? "?"}";
             var otherPort = _connections.ListenPort == 45680 ? 45681 : 45680;
@@ -112,10 +134,19 @@ namespace MassangerMaximka
             VoiceStatusLabel.Text = "Voice: idle";
 
             RefreshPeersList();
+            ApplyResponsiveLayout(Width);
         }
 
         protected override void OnDisappearing()
         {
+            if (_channelService?.ActiveChannelId != null)
+                _ = _channelService.LeaveChannel();
+            if (_channelService != null)
+            {
+                _channelService.InviteReceived -= OnChannelInviteReceived;
+                _channelService.MembersUpdated -= OnChannelMembersUpdated;
+            }
+
             if (_isInCall || _isCallingOut)
             {
                 _ = SendCallSignalAsync(_callPeerNodeId, CallEnd);
@@ -126,7 +157,7 @@ namespace MassangerMaximka
             _voiceCallManager = null;
             if (_discovery != null) { _discovery.PeerDiscovered -= OnPeerDiscovered; _discovery.PeerLost -= OnPeerLost; }
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
-            if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
+            if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.ImageReceived -= OnImageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
             if (_files != null) { _files.TransferProgressChanged -= OnTransferProgressChanged; _files.FileReceived -= OnFileReceived; }
             if (_metrics != null) _metrics.MetricsUpdated -= OnMetricsUpdated;
             DisposeVoicePlayback();
@@ -163,23 +194,69 @@ namespace MassangerMaximka
             {
                 var ep = _connections?.GetPeerEndPoint(nodeId);
                 if (ep != null)
+                {
                     _peerEndpointMap[nodeId] = ep;
+                    var displayName = ResolveDisplayName(nodeId);
+                    RememberPeer(displayName, ep.Address.ToString(), ep.Port);
+                }
 
                 RefreshPeersList();
                 _autoConnectInFlight.Remove(nodeId);
-                AppendChat($"[Connected] {nodeId}");
-                TechLog(LogCat.Network, $"TCP connected: {nodeId}" + (ep != null ? $" remote={ep}" : ""));
+                var name = ResolveDisplayName(nodeId);
+                AppendChat($"[Connected] {name}", toPeer: nodeId);
+                if (_selectedPeerNodeId == null && ep != null)
+                    PromoteConnectedPeer(ep, nodeId);
+                TechLog(LogCat.Network, $"TCP connected: {name} ({nodeId})" + (ep != null ? $" remote={ep}" : ""));
                 TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
             });
+        }
+
+        private string ResolveDisplayName(string nodeId)
+        {
+            if (_discovery?.Peers.TryGetValue(nodeId, out var peer) == true
+                && !string.IsNullOrWhiteSpace(peer.DisplayName))
+                return peer.DisplayName;
+            return nodeId.Length > 8 ? nodeId[..8] : nodeId;
+        }
+
+        private ObservableCollection<ChatItem> GetOrCreatePeerChat(string nodeId)
+        {
+            if (!_peerChats.TryGetValue(nodeId, out var chat))
+            {
+                chat = [];
+                _peerChats[nodeId] = chat;
+            }
+            return chat;
+        }
+
+        private void SwitchChat(string nodeId)
+        {
+            if (nodeId == _activeChatPeer) return;
+            _activeChatPeer = nodeId;
+            _activeChannelId = null;
+            _chatItems = GetOrCreatePeerChat(nodeId);
+            ChatList.ItemsSource = _chatItems;
+            ChannelBar.IsVisible = false;
+            SelectedPeerLabel.Text = ResolveDisplayName(nodeId);
+            if (_unreadPeers.Remove(nodeId))
+                RefreshPeersList();
+            if (_chatItems.Count > 0)
+                ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
         }
 
         private void OnPeerDisconnected(string nodeId)
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
+                var name = ResolveDisplayName(nodeId);
                 RefreshPeersList();
-                AppendChat($"[Disconnected] {nodeId}");
-                TechLog(LogCat.Network, $"TCP disconnected: {nodeId}");
+                AppendChat($"[Disconnected] {name}", toPeer: nodeId);
+                if (_channelMembers.Contains(nodeId))
+                {
+                    _ = _channelService!.HandleMemberLeave(nodeId);
+                    AppendToChannelChat($"[Channel] {name} disconnected");
+                }
+                TechLog(LogCat.Network, $"TCP disconnected: {name} ({nodeId})");
             });
         }
 
@@ -192,10 +269,18 @@ namespace MassangerMaximka
                 if (text.StartsWith(CallRequestPrefix, StringComparison.Ordinal))
                 {
                     var payload = text[CallRequestPrefix.Length..];
-                    var colonIdx = payload.LastIndexOf(':');
-                    var ipStr = colonIdx > 0 ? payload[..colonIdx] : payload;
-                    var voicePort = colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out var vp) ? vp : 45679;
-                    if (!_isInCall && !_isCallingOut && IPAddress.TryParse(ipStr, out var callerIp))
+                    var voicePort = ParseVoicePortPayload(payload);
+                    var callerIp = ResolveConnectedPeerAddress(msg.FromNodeId);
+                    _peerVoicePortMap[msg.FromNodeId] = voicePort;
+                    if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
+                    {
+                        if (callerIp != null)
+                        {
+                            SetChannelVoiceEndPoints();
+                            if (!_isInCall) _ = StartChannelCallAsync();
+                        }
+                    }
+                    else if (!_isInCall && !_isCallingOut && callerIp != null)
                     {
                         _incomingCallFromNodeId = msg.FromNodeId;
                         _incomingCallerIp = callerIp;
@@ -212,17 +297,16 @@ namespace MassangerMaximka
 
                 if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal) || text == CallAcceptLegacy)
                 {
-                    if (_isCallingOut && _callPeerNodeId == msg.FromNodeId && _callPeerIp != null)
+                    if (_isCallingOut && _callPeerIp != null)
                     {
                         _isCallingOut = false;
                         if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal))
-                        {
-                            var payload = text[CallAcceptPrefix.Length..];
-                            var colonIdx = payload.LastIndexOf(':');
-                            if (colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out var peerVp))
-                                _callPeerVoicePort = peerVp;
-                        }
-                        TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId} voice_port={_callPeerVoicePort}");
+                            _callPeerVoicePort = ParseVoicePortPayload(text[CallAcceptPrefix.Length..]);
+
+                        _callPeerIp = ResolveConnectedPeerAddress(msg.FromNodeId) ?? _callPeerIp;
+                        _peerVoicePortMap[msg.FromNodeId] = _callPeerVoicePort;
+                        if (_callPeerNodeId == null) _callPeerNodeId = msg.FromNodeId;
+                        TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId} ip={_callPeerIp} voice_port={_callPeerVoicePort}");
                         _ = StartCallAsync(_callPeerNodeId, _callPeerIp, _callPeerVoicePort);
                     }
                     return;
@@ -248,16 +332,83 @@ namespace MassangerMaximka
                     return;
                 }
 
-                AppendChat($"{msg.FromNodeId}: {text}");
+                if (text == PttStartSignal)
+                {
+                    var peerName = ResolveDisplayName(msg.FromNodeId);
+                    if (_activeChannelId != null)
+                    {
+                        ChannelPttLabel.Text = $"{peerName} is talking...";
+                        ChannelPttLabel.IsVisible = true;
+                    }
+                    else
+                    {
+                        VoiceStatusLabel.Text = $"{peerName} is talking...";
+                    }
+                    TechLog(LogCat.Protocol, $"PTT_START from {msg.FromNodeId}");
+                    return;
+                }
+
+                if (text == PttEndSignal)
+                {
+                    if (_activeChannelId != null)
+                    {
+                        ChannelPttLabel.IsVisible = false;
+                        ChannelPttLabel.Text = "";
+                    }
+                    else
+                    {
+                        VoiceStatusLabel.Text = _isInCall ? "Hold Talk to speak" : "Voice: idle";
+                    }
+                    TechLog(LogCat.Protocol, $"PTT_END from {msg.FromNodeId}");
+                    return;
+                }
+
+                var senderName = ResolveDisplayName(msg.FromNodeId);
+                if (_activeChannelId != null &&
+                    _channelMembers.Contains(msg.FromNodeId))
+                {
+                    AppendToChannelChat($"{senderName}: {text}");
+                }
+                else
+                {
+                    AppendChat($"{senderName}: {text}", toPeer: msg.FromNodeId);
+                    if (_activeChatPeer != msg.FromNodeId && _activeChannelId == null)
+                    {
+                        if (_activeChatPeer == null)
+                            SwitchChat(msg.FromNodeId);
+                        else
+                        {
+                            _unreadPeers.Add(msg.FromNodeId);
+                            RefreshPeersList();
+                        }
+                    }
+                }
                 TechLog(LogCat.Protocol, $"RECV ChatPacket id={msg.MessageId} from={msg.FromNodeId}");
                 TechLog(LogCat.Encryption, $"Payload deserialized: {text.Length} chars, ts={msg.TimestampUtc}");
+            });
+        }
+
+        private void OnImageReceived(TransportImageMessage msg)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                var name = ResolveDisplayName(msg.FromNodeId);
+                if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
+                    AppendToChannelChat($"{name}: [Photo] {msg.FileName}");
+                else
+                    AppendChat($"{name}: [Photo] {msg.FileName}", toPeer: msg.FromNodeId, imageBytes: msg.Data);
+                TechLog(LogCat.Transport, $"RECV image from={msg.FromNodeId} file={msg.FileName} bytes={msg.Data.Length}");
             });
         }
 
         private void OnDeliveryStatusChanged(string messageId, DeliveryStatus status)
         {
             MainThread.BeginInvokeOnMainThread(() =>
-                TechLog(LogCat.Protocol, $"Delivery {messageId}: {status}"));
+            {
+                if (_pendingItems.TryGetValue(messageId, out var item))
+                    item.Status = status.ToString();
+                TechLog(LogCat.Protocol, $"Delivery {messageId}: {status}");
+            });
         }
 
         private void OnTransferProgressChanged(TransportFileTransferInfo transfer)
@@ -283,8 +434,11 @@ namespace MassangerMaximka
                 }
 
                 var fileName = Path.GetFileName(savedPath);
-                FileTransferLabel.Text = $"File received: {fileName}";
-                TechLog(LogCat.Protocol, $"FILE RECV complete id={transferId} path={savedPath}");
+                var integrityOk = _files?.ActiveTransfers.TryGetValue(transferId, out var tf) == true
+                    && tf?.State == FileTransferState.Completed;
+                var integrityTag = integrityOk ? " SHA256 OK" : " SHA256 FAIL";
+                FileTransferLabel.Text = $"File received: {fileName}{integrityTag}";
+                TechLog(LogCat.Protocol, $"FILE RECV complete id={transferId} integrity={integrityOk} path={savedPath}");
 
                 if (fileName.StartsWith("voice_", StringComparison.OrdinalIgnoreCase) &&
                     fileName.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
@@ -294,7 +448,7 @@ namespace MassangerMaximka
                 }
                 else
                 {
-                    AppendChat($"[File] {fileName}");
+                    AppendChat($"[File] {fileName}{integrityTag}");
                 }
             });
         }
@@ -313,7 +467,169 @@ namespace MassangerMaximka
         private void OnMetricsUpdated(ConnectionMetrics m)
         {
             MainThread.BeginInvokeOnMainThread(() =>
-                TechLog(LogCat.Metrics, $"RTT={m.RttMs:F1}ms loss={m.PacketLossPercent:F1}% throughput={m.ThroughputBytesPerSec / 1024:F1}KB/s retries={m.RetryCount} peer={m.PeerNodeId}"));
+            {
+                MetricRttLabel.Text = $"{m.RttMs:F0}ms";
+                MetricLossLabel.Text = $"{m.PacketLossPercent:F1}%";
+                MetricRetriesLabel.Text = m.RetryCount.ToString();
+                var quality = _metrics?.GetQuality(m.PeerNodeId) ?? ConnectionQuality.Unknown;
+                MetricQualityLabel.Text = quality.ToString();
+                MetricQualityLabel.TextColor = quality switch
+                {
+                    ConnectionQuality.Excellent => Color.FromArgb("#4CAF50"),
+                    ConnectionQuality.Good      => Color.FromArgb("#8BC34A"),
+                    ConnectionQuality.Fair      => Color.FromArgb("#FFC107"),
+                    ConnectionQuality.Poor      => Color.FromArgb("#F44336"),
+                    _                           => Color.FromArgb("#7A7570")
+                };
+                TechLog(LogCat.Metrics, $"RTT={m.RttMs:F1}ms loss={m.PacketLossPercent:F1}% throughput={m.ThroughputBytesPerSec / 1024:F1}KB/s retries={m.RetryCount} peer={m.PeerNodeId}");
+            });
+        }
+
+        // --- Channel ---
+
+        private async void OnCreateChannelClicked(object? sender, EventArgs e)
+        {
+            if (_channelService == null) return;
+            var name = await DisplayPromptAsync("New Channel", "Channel name:", initialValue: "Group");
+            if (string.IsNullOrWhiteSpace(name)) return;
+            var packet = _channelService.CreateChannel(name);
+            _activeChannelName = packet.ChannelName;
+            _channelMembers = packet.MemberNodeIds;
+            SwitchToChannel();
+            TechLog(LogCat.Protocol, $"Channel created: {_channelService.ActiveChannelId} '{name}'");
+            await InvitePeersToChannelAsync();
+        }
+
+        private async Task InvitePeersToChannelAsync()
+        {
+            if (_channelService == null) return;
+            var connected = _connections?.Connections.Keys
+                .Where(id => !_channelMembers.Contains(id))
+                .ToList() ?? [];
+            if (connected.Count == 0)
+            {
+                AppendToChannelChat("[Channel] No new peers to invite.");
+                return;
+            }
+
+            bool inviting = true;
+            while (inviting && connected.Count > 0)
+            {
+                var names = connected.Select(id => $"{ResolveDisplayName(id)} ({id})").ToArray();
+                var picked = await DisplayActionSheet("Invite to channel", "Done", null, names);
+                if (string.IsNullOrEmpty(picked) || picked == "Done") break;
+
+                var parenIdx = picked.LastIndexOf('(');
+                var nodeId = parenIdx > 0 ? picked[(parenIdx + 1)..].TrimEnd(')') : null;
+                if (string.IsNullOrEmpty(nodeId)) continue;
+
+                await _channelService.SendInvite(nodeId);
+                AppendToChannelChat($"[Channel] Invite sent to {ResolveDisplayName(nodeId)}");
+                TechLog(LogCat.Protocol, $"Channel invite sent to {nodeId}");
+                connected.Remove(nodeId);
+            }
+        }
+
+        private void OnChannelInviteReceived(ChannelPacket invite)
+        {
+            MainThread.BeginInvokeOnMainThread(async () =>
+            {
+                var fromName = ResolveDisplayName(invite.FromNodeId);
+                var accept = await DisplayAlert(
+                    "Channel Invite",
+                    $"{fromName} invites you to channel '{invite.ChannelName}'",
+                    "Join", "Decline");
+                if (accept)
+                {
+                    await _channelService!.JoinChannel(invite.ChannelId, invite.FromNodeId);
+                    _channelMembers = invite.MemberNodeIds;
+                    _activeChannelName = invite.ChannelName;
+                    SwitchToChannel();
+                    AppendToChannelChat($"[Channel] Joined '{invite.ChannelName}' created by {fromName}");
+                    TechLog(LogCat.Protocol, $"Joined channel {invite.ChannelId}");
+                    SetChannelVoiceEndPoints();
+                }
+                else
+                {
+                    TechLog(LogCat.Protocol, $"Declined channel invite from {invite.FromNodeId}");
+                }
+            });
+        }
+
+        private void OnChannelMembersUpdated(ChannelPacket packet)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                _channelMembers = packet.MemberNodeIds;
+                if (!string.IsNullOrEmpty(packet.ChannelName)) _activeChannelName = packet.ChannelName;
+                ChannelInfoLabel.Text = $"Channel: {packet.ChannelId} | Members: {packet.MemberNodeIds.Count}";
+                SetChannelVoiceEndPoints();
+                RefreshPeersList();
+                TechLog(LogCat.Protocol, $"Channel members updated: {packet.MemberNodeIds.Count}");
+            });
+        }
+
+        private void SwitchToChannel()
+        {
+            if (_channelChat == null) _channelChat = [];
+            _activeChannelId = _channelService?.ActiveChannelId;
+            _activeChatPeer = null;
+            _chatItems = _channelChat;
+            ChatList.ItemsSource = _channelChat;
+            SelectedPeerLabel.Text = $"#{_activeChannelName ?? "channel"}";
+            ChannelBar.IsVisible = true;
+            ChannelInfoLabel.Text = $"Channel: {_channelService?.ActiveChannelId} | Members: {_channelMembers.Count}";
+            RefreshPeersList();
+        }
+
+        private void AppendToChannelChat(string text)
+        {
+            if (_channelChat == null) _channelChat = [];
+            var item = new ChatItem { Text = text };
+            _channelChat.Add(item);
+            if (_activeChannelId != null)
+                ChatList.ScrollTo(item, ScrollToPosition.End, animate: false);
+        }
+
+        private async void OnInviteToChannelClicked(object? sender, EventArgs e)
+        {
+            if (_channelService == null || _activeChannelId == null) return;
+            await InvitePeersToChannelAsync();
+        }
+
+        private async void OnLeaveChannelClicked(object? sender, EventArgs e)
+        {
+            if (_channelService == null) return;
+            if (_isInCall) EndCall();
+            await _channelService.LeaveChannel();
+            _activeChannelId = null;
+            _channelChat = null;
+            _channelMembers = [];
+            _activeChannelName = null;
+            _activeChatPeer = null;
+            ChannelBar.IsVisible = false;
+            ChannelPttLabel.IsVisible = false;
+            _chatItems = [];
+            ChatList.ItemsSource = _chatItems;
+            SelectedPeerLabel.Text = "Select a peer";
+            _voice?.ClearExtraEndPoints();
+            RefreshPeersList();
+            TechLog(LogCat.Protocol, "Left channel");
+        }
+
+        private void SetChannelVoiceEndPoints()
+        {
+            if (_voice == null) return;
+            var extras = new List<System.Net.IPEndPoint>();
+            foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+            {
+                if (_peerEndpointMap.TryGetValue(m, out var tcpEp))
+                {
+                    var voicePort = _peerVoicePortMap.TryGetValue(m, out var vp) ? vp : _voice.ListenPort;
+                    extras.Add(new System.Net.IPEndPoint(tcpEp.Address, voicePort));
+                }
+            }
+            _voice.SetExtraEndPoints(extras);
         }
 
         // --- Peers ---
@@ -321,8 +637,23 @@ namespace MassangerMaximka
         private void RefreshPeersList()
         {
             _peers.Clear();
+            if (_activeChannelId != null)
+                _peers.Add($"#CH {_activeChannelName ?? "channel"} | {_channelMembers.Count} members");
             var seen = new HashSet<string>();
             var seenEndpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (_connections != null)
+                foreach (var nodeId in _connections.Connections.Keys)
+                {
+                    if (seen.Contains(nodeId)) continue;
+                    seen.Add(nodeId);
+                    var connEp = _connections.GetPeerEndPoint(nodeId);
+                    var connEpStr = connEp != null ? $"{connEp.Address}:{connEp.Port}" : "";
+                    if (!string.IsNullOrEmpty(connEpStr) && !seenEndpoints.Add(connEpStr)) continue;
+                    var name = ResolveDisplayName(nodeId);
+                    var isSaved = !string.IsNullOrWhiteSpace(connEpStr)
+                        && _savedPeers.Any(p => string.Equals(p.EndPoint, connEpStr, StringComparison.OrdinalIgnoreCase));
+                    _peers.Add(FormatPeerDisplay(name, nodeId, connEpStr, isSaved, false, true));
+                }
             if (_discovery != null)
                 foreach (var kv in _discovery.Peers)
                 {
@@ -331,13 +662,6 @@ namespace MassangerMaximka
                     var isSaved = _savedPeers.Any(p => string.Equals(p.EndPoint, kv.Value.EndPoint, StringComparison.OrdinalIgnoreCase));
                     var isConnected = _connections?.IsConnected(kv.Key) == true;
                     _peers.Add(FormatPeerDisplay(kv.Value.DisplayName, kv.Key, kv.Value.EndPoint, isSaved, true, isConnected));
-                }
-            if (_connections != null)
-                foreach (var nodeId in _connections.Connections.Keys)
-                {
-                    if (seen.Contains(nodeId)) continue;
-                    seen.Add(nodeId);
-                    _peers.Add(FormatPeerDisplay("Peer", nodeId, "", false, false, true));
                 }
             foreach (var peer in _savedPeers.OrderBy(p => p.DisplayName).ThenBy(p => p.EndPoint))
             {
@@ -350,19 +674,35 @@ namespace MassangerMaximka
         private void OnPeerSelected(object? sender, SelectionChangedEventArgs e)
         {
             if (e.CurrentSelection.FirstOrDefault() is not string s) return;
+
+            if (s.StartsWith("#CH ", StringComparison.Ordinal))
+            {
+                SwitchToChannel();
+                return;
+            }
+
             _selectedPeerNodeId = ExtractNodeId(s);
             var savedEndPoint = ExtractEndPoint(s);
             if (!string.IsNullOrWhiteSpace(savedEndPoint))
                 ManualIpEntry.Text = savedEndPoint;
-            SelectedPeerLabel.Text = $"Selected: {_selectedPeerNodeId ?? "(none)"}";
+
+            _selectedPeerNodeId = NormalizeNodeId(_selectedPeerNodeId, savedEndPoint);
+            if (_selectedPeerNodeId != null)
+                SwitchChat(_selectedPeerNodeId);
         }
 
         private async void OnPeerDoubleTapped(object? sender, TappedEventArgs e)
         {
-            if (sender is not Label label)
+            string? displayText = null;
+            if (sender is Label label)
+                displayText = label.Text;
+            else if (sender is Grid grid && grid.Children.OfType<Label>().FirstOrDefault() is Label childLabel)
+                displayText = childLabel.Text;
+
+            if (string.IsNullOrWhiteSpace(displayText))
                 return;
 
-            var endPointText = ExtractEndPoint(label.Text);
+            var endPointText = ExtractEndPoint(displayText);
             if (string.IsNullOrWhiteSpace(endPointText))
                 return;
 
@@ -370,15 +710,16 @@ namespace MassangerMaximka
             if (!ParseEndpoint(endPointText, out var ip, out var port))
                 return;
 
-            if (_connections == null || _discovery == null)
+            if (_connections == null)
                 return;
 
-            var nodeId = ExtractNodeId(label.Text) ?? $"manual-{ip}:{port}";
+            var nodeId = NormalizeNodeId(ExtractNodeId(displayText), endPointText) ?? $"endpoint:{ip}:{port}";
             RememberPeer($"Manual {ip}", ip.ToString(), port);
-            _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
             TechLog(LogCat.Network, $"Double-tap connect -> {ip}:{port}");
-            var ok = await _connections.ConnectToPeerAsync(nodeId, new IPEndPoint(ip, port));
-            AppendChat(ok ? $"[Connected] {nodeId}" : $"[Failed] {nodeId}");
+            var endPoint = new IPEndPoint(ip, port);
+            var ok = await _connections.ConnectToPeerAsync(nodeId, endPoint);
+            var connectedNodeId = ok ? PromoteConnectedPeer(endPoint, nodeId) : nodeId;
+            AppendChat(ok ? $"[Connected] {connectedNodeId}" : $"[Failed] {nodeId}");
             RefreshPeersList();
         }
 
@@ -387,42 +728,54 @@ namespace MassangerMaximka
         private async void OnConnectClicked(object? sender, EventArgs e)
         {
             var input = ManualIpEntry.Text?.Trim();
-            if (string.IsNullOrEmpty(input) || _connections == null || _discovery == null) return;
+            if (string.IsNullOrEmpty(input) || _connections == null) return;
             if (!ParseEndpoint(input, out var ip, out var port))
             {
                 AppendChat("[Error] Invalid IP:port");
                 return;
             }
             RememberPeer($"Manual {ip}", ip.ToString(), port);
-            var nodeId = $"manual-{ip}:{port}";
-            _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
+            var nodeId = $"endpoint:{ip}:{port}";
             TechLog(LogCat.Network, $"Connecting to {ip}:{port}...");
-            var ok = await _connections.ConnectToPeerAsync(nodeId, new IPEndPoint(ip, port));
-            AppendChat(ok ? $"[Connected] {nodeId}" : $"[Failed] {nodeId}");
-            if (ok) TechLog(LogCat.Encryption, $"TCP session established with {nodeId}");
+            var endPoint = new IPEndPoint(ip, port);
+            var ok = await _connections.ConnectToPeerAsync(nodeId, endPoint);
+            var connectedNodeId = ok ? PromoteConnectedPeer(endPoint, nodeId) : nodeId;
+            AppendChat(ok ? $"[Connected] {connectedNodeId}" : $"[Failed] {nodeId}");
+            if (ok) TechLog(LogCat.Encryption, $"TCP session established with {connectedNodeId}");
             RefreshPeersList();
         }
 
         private async void OnSendClicked(object? sender, EventArgs e)
         {
-            var text = MessageEntry.Text?.Trim();
+            var activeEntry = MessageBarNarrow.IsVisible ? MessageEntryNarrow : MessageEntry;
+            var text = activeEntry.Text?.Trim();
             if (string.IsNullOrEmpty(text) || _chat == null) return;
-            var toNodeId = _selectedPeerNodeId;
-            if (string.IsNullOrEmpty(toNodeId))
+            MessageEntry.Text = "";
+            MessageEntryNarrow.Text = "";
+
+            if (_activeChannelId != null && _channelMembers.Count > 0)
             {
-                toNodeId = _peers.Count > 0 ? ExtractNodeId(_peers[0]) : null;
+                foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                {
+                    TechLog(LogCat.Transport, $"CHANNEL SEND to={m} len={text.Length}");
+                    var msg = await _chat.SendMessageAsync(m, text);
+                    TechLog(LogCat.Protocol, $"CHANNEL SENT id={msg.MessageId}");
+                }
+                AppendToChannelChat($"Me: {text}");
+                return;
             }
+
+            var toNodeId = GetSelectedOrFirstPeerNodeId();
             if (string.IsNullOrEmpty(toNodeId))
             {
                 AppendChat("[Error] Select a peer first");
                 return;
             }
-            MessageEntry.Text = "";
             TechLog(LogCat.Transport, $"SEND ChatPacket to={toNodeId} len={text.Length}");
-            TechLog(LogCat.Encryption, $"Serializing envelope: JSON + length-prefix (4B header)");
-            var msg = await _chat.SendMessageAsync(toNodeId, text);
-            AppendChat($"Me -> {toNodeId}: {text}");
-            TechLog(LogCat.Protocol, $"SENT id={msg.MessageId} status={msg.Status}");
+            var sentMsg = await _chat.SendMessageAsync(toNodeId, text);
+            var item = AppendChat($"Me: {text}", status: "Sent");
+            _pendingItems[sentMsg.MessageId] = item;
+            TechLog(LogCat.Protocol, $"SENT id={sentMsg.MessageId} status={sentMsg.Status}");
         }
 
         private void OnClearChatClicked(object? sender, EventArgs e) => _chatItems.Clear();
@@ -464,6 +817,63 @@ namespace MassangerMaximka
             {
                 AppendChat($"[Error] File send failed: {ex.Message}");
                 TechLog(LogCat.System, $"File send failed: {ex.Message}");
+            }
+        }
+
+        private async void OnSendPhotoClicked(object? sender, EventArgs e)
+        {
+            if (_chat == null)
+            {
+                AppendChat("[Error] Chat transport unavailable");
+                return;
+            }
+
+            var toNodeId = GetSelectedOrFirstPeerNodeId();
+            if (string.IsNullOrEmpty(toNodeId))
+            {
+                AppendChat("[Error] Select a peer first");
+                return;
+            }
+
+            try
+            {
+                var result = await FilePicker.Default.PickAsync(new PickOptions
+                {
+                    PickerTitle = "Select photo",
+                    FileTypes = FilePickerFileType.Images
+                });
+
+                if (result == null)
+                    return;
+
+                await using var stream = await result.OpenReadAsync();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                var bytes = ms.ToArray();
+                if (bytes.Length > 20 * 1024 * 1024)
+                {
+                    AppendChat("[Error] Photo is larger than 20 MB");
+                    TechLog(LogCat.System, $"Photo rejected: {bytes.Length} bytes exceeds 20MB");
+                    return;
+                }
+
+                if (_activeChannelId != null && _channelMembers.Count > 0)
+                {
+                    foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                        await _chat.SendImageAsync(m, result.FileName, bytes);
+                    AppendToChannelChat($"Me: [Photo] {result.FileName}");
+                }
+                else
+                {
+                    await _chat.SendImageAsync(toNodeId, result.FileName, bytes);
+                    AppendChat($"Me: [Photo] {result.FileName}", status: "Sent", toPeer: toNodeId, imageBytes: bytes);
+                }
+                TechLog(LogCat.Transport, $"SEND image to={toNodeId} file={result.FileName} bytes={bytes.Length}");
+            }
+            catch (Exception ex)
+            {
+                AppendChat($"[Error] Photo send failed: {ex.Message}");
+                TechLog(LogCat.System, $"Photo send failed: {ex.Message}");
             }
         }
 
@@ -530,6 +940,8 @@ namespace MassangerMaximka
                 await _audioRecorder.StartAsync(CreateVoiceRecorderOptions());
                 _isRecordingVoice = true;
                 RecordBtn.BackgroundColor = Color.FromArgb("#F44336");
+                StopSendBtn.Text = "SEND";
+                StopSendBtn.BackgroundColor = Color.FromArgb("#1976D2");
                 VoiceStatusLabel.Text = "Voice: RECORDING...";
                 TechLog(LogCat.System, $"Voice recording started -> temp file, final path {_voiceRecordPath}");
             }
@@ -553,6 +965,8 @@ namespace MassangerMaximka
                 _isRecordingVoice = false;
                 _audioRecorder = null;
                 RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
+                StopSendBtn.Text = "STOP";
+                StopSendBtn.BackgroundColor = Color.FromArgb("#3A3530");
 
                 var path = await PersistVoiceRecordingAsync(source);
                 if (string.IsNullOrEmpty(path) || !File.Exists(path) || new FileInfo(path).Length <= 44)
@@ -594,6 +1008,8 @@ namespace MassangerMaximka
                 _isRecordingVoice = false;
                 _audioRecorder = null;
                 RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
+                StopSendBtn.Text = "STOP";
+                StopSendBtn.BackgroundColor = Color.FromArgb("#3A3530");
                 AppendChat($"[Error] Voice send failed: {ex.Message}");
                 TechLog(LogCat.System, $"Voice send error: {ex.Message}");
                 VoiceStatusLabel.Text = "Voice: idle";
@@ -617,9 +1033,23 @@ namespace MassangerMaximka
         {
             if (_isInCall || _isCallingOut)
             {
-                _ = SendCallSignalAsync(_callPeerNodeId, CallEnd);
+                if (_activeChannelId != null)
+                {
+                    foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                        _ = SendCallSignalAsync(m, CallEnd);
+                }
+                else
+                {
+                    _ = SendCallSignalAsync(_callPeerNodeId, CallEnd);
+                }
                 if (_isInCall) EndCall();
                 else ResetCallingState();
+                return;
+            }
+
+            if (_activeChannelId != null)
+            {
+                await StartChannelCallAsync();
                 return;
             }
 
@@ -639,19 +1069,64 @@ namespace MassangerMaximka
 
             _callPeerNodeId = nodeId;
             _callPeerIp = ip;
-            var config = MauiProgram.AppInstance?.Services.GetService<NodeConfiguration>();
-            _callPeerVoicePort = config?.VoicePort ?? 45679;
+            _callPeerVoicePort = _peerVoicePortMap.TryGetValue(nodeId, out var knownVp) ? knownVp : (_voice?.ListenPort ?? 45679);
             _isCallingOut = true;
 
-            var localIp = GetLocalIpAddress();
             var voicePort = _voice?.ListenPort ?? 45679;
-            await SendCallSignalAsync(nodeId, $"{CallRequestPrefix}{localIp}:{voicePort}");
+            await SendCallSignalAsync(nodeId, $"{CallRequestPrefix}{voicePort}");
 
             CallBtn.Text = "Cancel";
             CallBtn.BackgroundColor = Color.FromArgb("#E65100");
             VoiceStatusLabel.Text = $"Calling {nodeId}...";
             AppendChat($"[Call] Calling {nodeId}...");
-            TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} ip={localIp} voice_port={voicePort}");
+            TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} voice_port={voicePort}");
+        }
+
+        private async Task StartChannelCallAsync()
+        {
+            if (_voice == null || _audioManager == null)
+            {
+                AppendToChannelChat("[Error] Voice transport not available");
+                return;
+            }
+            if (!await EnsureMicPermissionAsync())
+            {
+                AppendToChannelChat("[Error] Mic permission denied");
+                return;
+            }
+
+            SetChannelVoiceEndPoints();
+            _isInCall = true;
+            try
+            {
+                _voiceCallManager?.Dispose();
+                _voiceCallManager = new VoiceCallManager(_voice, _audioManager);
+                _voiceCallManager.Log += msg =>
+                    MainThread.BeginInvokeOnMainThread(() => TechLog(LogCat.System, msg));
+                _voice.StartListening();
+                _voiceCallManager.StartChannelMode();
+            }
+            catch (Exception ex)
+            {
+                AppendToChannelChat($"[Error] Channel call failed: {ex.Message}");
+                _isInCall = false;
+                ResetCallingState();
+                return;
+            }
+
+            var voicePort = _voice.ListenPort;
+            if (_localNodeId != null) _peerVoicePortMap[_localNodeId] = voicePort;
+            foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                _ = SendCallSignalAsync(m, $"{CallRequestPrefix}{voicePort}");
+
+            RecordBtn.IsVisible = false;
+            StopSendBtn.IsVisible = false;
+            PttBtn.IsVisible = true;
+            CallBtn.Text = "Hang Up";
+            CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
+            VoiceStatusLabel.Text = "Channel call - Hold Talk to speak";
+            AppendToChannelChat($"[Call] Channel call started");
+            TechLog(LogCat.Network, $"Channel call started, voice_port={voicePort}, members={_channelMembers.Count}");
         }
 
         private async Task StartCallAsync(string nodeId, IPAddress ip, int voicePort)
@@ -659,16 +1134,19 @@ namespace MassangerMaximka
             if (_voice == null || _audioManager == null)
             {
                 AppendChat("[Error] Voice transport or audio not available");
+                ResetCallingState();
                 return;
             }
 
             if (!await EnsureMicPermissionAsync())
             {
                 AppendChat("[Error] Microphone permission denied");
+                ResetCallingState();
                 return;
             }
 
             _isInCall = true;
+            _callPeerNodeId = nodeId;
             var remoteVoiceEndPoint = new System.Net.IPEndPoint(ip, voicePort);
 
             try
@@ -684,13 +1162,17 @@ namespace MassangerMaximka
                 AppendChat($"[Error] Voice transport failed to start: {ex.Message}");
                 TechLog(LogCat.System, $"Voice call start error: {ex.Message}");
                 _isInCall = false;
+                ResetCallingState();
                 return;
             }
 
+            RecordBtn.IsVisible = false;
+            StopSendBtn.IsVisible = false;
+            PttBtn.IsVisible = true;
             CallBtn.Text = "Hang Up";
             CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
-            VoiceStatusLabel.Text = $"Call: {nodeId}";
-            AppendChat($"[Call] Started call with {nodeId}");
+            VoiceStatusLabel.Text = "Hold Talk to speak";
+            AppendChat($"[Call] Walkie-talkie with {ResolveDisplayName(nodeId)}");
             TechLog(LogCat.Network, $"Voice call started -> {ip}:{voicePort}");
         }
 
@@ -698,34 +1180,44 @@ namespace MassangerMaximka
         {
             _voiceCallManager?.Dispose();
             _voiceCallManager = null;
+            _voice?.Stop();
+            _voice?.ClearExtraEndPoints();
 
             _isInCall = false;
             _callPeerNodeId = null;
             _callPeerIp = null;
+            RecordBtn.IsVisible = true;
+            StopSendBtn.IsVisible = true;
+            PttBtn.IsVisible = false;
             CallBtn.Text = "Call";
             CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
             VoiceStatusLabel.Text = "Voice: idle";
-            AppendChat("[Call] Call ended");
+            if (_activeChannelId != null)
+                AppendToChannelChat("[Call] Channel call ended");
+            else
+                AppendChat("[Call] Call ended");
             TechLog(LogCat.Network, "Voice call ended");
         }
 
         private async void OnAcceptCallClicked(object? sender, EventArgs e)
         {
             var fromNodeId = _incomingCallFromNodeId;
-            var callerIp = _incomingCallerIp;
             var callerVoicePort = _incomingCallerVoicePort;
             HideIncomingCallBanner();
 
-            if (string.IsNullOrEmpty(fromNodeId) || callerIp == null) return;
+            if (string.IsNullOrEmpty(fromNodeId)) return;
 
-            var localIp = GetLocalIpAddress();
+            var callerIp = ResolveConnectedPeerAddress(fromNodeId) ?? _incomingCallerIp;
+            if (callerIp == null) return;
+
             var localVoicePort = _voice?.ListenPort ?? 45679;
-            await SendCallSignalAsync(fromNodeId, $"{CallAcceptPrefix}{localIp}:{localVoicePort}");
+            await SendCallSignalAsync(fromNodeId, $"{CallAcceptPrefix}{localVoicePort}");
             _callPeerNodeId = fromNodeId;
             _callPeerIp = callerIp;
             _callPeerVoicePort = callerVoicePort;
+            _peerVoicePortMap[fromNodeId] = callerVoicePort;
+            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice_port={localVoicePort} peer_tcp_ip={callerIp} peer_voice={callerVoicePort}");
             await StartCallAsync(fromNodeId, callerIp, callerVoicePort);
-            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice={localIp}:{localVoicePort}");
         }
 
         private async void OnDeclineCallClicked(object? sender, EventArgs e)
@@ -759,6 +1251,9 @@ namespace MassangerMaximka
             _isCallingOut = false;
             _callPeerNodeId = null;
             _callPeerIp = null;
+            RecordBtn.IsVisible = true;
+            StopSendBtn.IsVisible = true;
+            PttBtn.IsVisible = false;
             CallBtn.Text = "Call";
             CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
             VoiceStatusLabel.Text = "Voice: idle";
@@ -771,16 +1266,37 @@ namespace MassangerMaximka
             catch { }
         }
 
-        private static string GetLocalIpAddress()
+        private async void OnPttPressed(object? sender, EventArgs e)
         {
-            try
+            if (_voiceCallManager == null || !_isInCall) return;
+            PttBtn.BackgroundColor = Color.FromArgb("#F44336");
+            PttBtn.Text = "TALKING";
+            VoiceStatusLabel.Text = "TALKING...";
+            BroadcastPttSignal(PttStartSignal);
+            await _voiceCallManager.StartTalkingAsync();
+        }
+
+        private async void OnPttReleased(object? sender, EventArgs e)
+        {
+            if (_voiceCallManager == null) return;
+            PttBtn.BackgroundColor = Color.FromArgb("#1976D2");
+            PttBtn.Text = "Talk";
+            VoiceStatusLabel.Text = "Hold Talk to speak";
+            await _voiceCallManager.StopTalkingAsync();
+            BroadcastPttSignal(PttEndSignal);
+        }
+
+        private void BroadcastPttSignal(string signal)
+        {
+            if (_activeChannelId != null && _channelMembers.Count > 0)
             {
-                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
-                return host.AddressList
-                    .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                    ?.ToString() ?? "127.0.0.1";
+                foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                    _ = SendCallSignalAsync(m, signal);
             }
-            catch { return "127.0.0.1"; }
+            else
+            {
+                _ = SendCallSignalAsync(_callPeerNodeId, signal);
+            }
         }
 
         private static async Task<bool> EnsureMicPermissionAsync()
@@ -853,11 +1369,20 @@ namespace MassangerMaximka
 
         // --- Logging ---
 
-        private void AppendChat(string line)
+        private ChatItem AppendChat(string line, string? status = null, string? toPeer = null, byte[]? imageBytes = null)
         {
-            _chatItems.Add(new ChatItem { Text = $"{DateTime.Now:HH:mm:ss} {line}" });
-            if (_chatItems.Count > 200) _chatItems.RemoveAt(0);
-            ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
+            var collection = !string.IsNullOrEmpty(toPeer) ? GetOrCreatePeerChat(toPeer) : _chatItems;
+            var item = new ChatItem
+            {
+                Text = $"{DateTime.Now:HH:mm:ss} {line}",
+                Status = status,
+                ImageBytes = imageBytes
+            };
+            collection.Add(item);
+            if (collection.Count > 200) collection.RemoveAt(0);
+            if (ReferenceEquals(collection, _chatItems) && collection.Count > 0)
+                ChatList.ScrollTo(collection[^1], ScrollToPosition.End, animate: false);
+            return item;
         }
 
         private void AppendVoiceMessage(string filePath, bool fromPeer)
@@ -1031,7 +1556,7 @@ namespace MassangerMaximka
             return s > 0 && e > s ? display[s..e] : null;
         }
 
-        private static string FormatPeerDisplay(
+        private string FormatPeerDisplay(
             string displayName,
             string? nodeId,
             string endPoint,
@@ -1043,6 +1568,7 @@ namespace MassangerMaximka
             if (isSaved) parts.Add("saved");
             if (isOnline) parts.Add("online");
             if (isConnected) parts.Add("connected");
+            if (nodeId != null && _unreadPeers.Contains(nodeId)) parts.Add("NEW");
             var status = parts.Count == 0 ? "" : $"[{string.Join(" | ", parts)}] ";
             var node = string.IsNullOrWhiteSpace(nodeId) ? "" : $" ({nodeId})";
             var ep = string.IsNullOrWhiteSpace(endPoint) ? "" : $" [{endPoint}]";
@@ -1051,8 +1577,13 @@ namespace MassangerMaximka
 
         private IPAddress? ResolvePeerIpAddress(string nodeId)
         {
+            nodeId = NormalizeNodeId(nodeId) ?? nodeId;
             if (_peerEndpointMap.TryGetValue(nodeId, out var cachedEp))
                 return cachedEp.Address;
+
+            var connectedEp = ResolveConnectedPeerEndPoint(nodeId);
+            if (connectedEp != null)
+                return connectedEp.Address;
 
             if (_discovery?.Peers.TryGetValue(nodeId, out var peer) == true &&
                 IPAddress.TryParse(peer.IpAddress, out var discovered))
@@ -1079,9 +1610,151 @@ namespace MassangerMaximka
         private string? GetSelectedOrFirstPeerNodeId()
         {
             if (!string.IsNullOrEmpty(_selectedPeerNodeId))
-                return _selectedPeerNodeId;
+                return NormalizeNodeId(_selectedPeerNodeId, ManualIpEntry.Text?.Trim()) ?? _selectedPeerNodeId;
 
-            return _peers.Count > 0 ? ExtractNodeId(_peers[0]) : null;
+            if (_peers.Count == 0)
+                return null;
+
+            var first = _peers[0];
+            return NormalizeNodeId(ExtractNodeId(first), ExtractEndPoint(first));
+        }
+
+        protected override void OnSizeAllocated(double width, double height)
+        {
+            base.OnSizeAllocated(width, height);
+            ApplyResponsiveLayout(width);
+        }
+
+        private void ApplyResponsiveLayout(double width)
+        {
+            if (width <= 0)
+                return;
+
+            var narrow = width < 700;
+            _isNarrowLayout = narrow;
+            MessageBarWide.IsVisible = !narrow;
+            MessageBarNarrow.IsVisible = narrow;
+            SidebarDivider.IsVisible = !narrow;
+
+            if (narrow)
+            {
+                RootLayout.ColumnDefinitions[0].Width = GridLength.Star;
+                RootLayout.ColumnDefinitions[1].Width = new GridLength(0);
+                Grid.SetRow(SidebarPanel, 0);
+                Grid.SetColumn(SidebarPanel, 0);
+                Grid.SetRowSpan(SidebarPanel, 1);
+                Grid.SetRow(ChatPanel, 1);
+                Grid.SetColumn(ChatPanel, 0);
+                Grid.SetRowSpan(ChatPanel, 1);
+                SidebarPanel.MaximumHeightRequest = 220;
+                PeersList.HeightRequest = 140;
+            }
+            else
+            {
+                RootLayout.ColumnDefinitions[0].Width = new GridLength(DeviceInfo.Idiom == DeviceIdiom.Phone ? 160 : 220);
+                RootLayout.ColumnDefinitions[1].Width = GridLength.Star;
+                Grid.SetRow(SidebarPanel, 0);
+                Grid.SetColumn(SidebarPanel, 0);
+                Grid.SetRowSpan(SidebarPanel, 2);
+                Grid.SetRow(ChatPanel, 0);
+                Grid.SetColumn(ChatPanel, 1);
+                Grid.SetRowSpan(ChatPanel, 2);
+                SidebarPanel.MaximumHeightRequest = double.PositiveInfinity;
+                PeersList.HeightRequest = -1;
+            }
+
+            DiagnosticsPanel.IsVisible = !narrow;
+            ChatPanel.RowDefinitions[6].Height = narrow
+                ? new GridLength(0)
+                : new GridLength(2, GridUnitType.Star);
+        }
+
+        private string? NormalizeNodeId(string? nodeId, string? endPointText = null)
+        {
+            if (!string.IsNullOrWhiteSpace(endPointText) && ParseEndpoint(endPointText, out var ip, out var port))
+            {
+                var connectedNodeId = _connections?.FindPeerNodeId(new IPEndPoint(ip, port));
+                if (!string.IsNullOrWhiteSpace(connectedNodeId))
+                {
+                    if (!string.IsNullOrWhiteSpace(nodeId) && !string.Equals(nodeId, connectedNodeId, StringComparison.Ordinal))
+                        MergePeerIdentity(nodeId, connectedNodeId);
+                    return connectedNodeId;
+                }
+            }
+
+            return nodeId;
+        }
+
+        private string PromoteConnectedPeer(IPEndPoint endPoint, string fallbackNodeId)
+        {
+            var actualNodeId = _connections?.FindPeerNodeId(endPoint) ?? fallbackNodeId;
+            if (!string.Equals(actualNodeId, fallbackNodeId, StringComparison.Ordinal))
+                MergePeerIdentity(fallbackNodeId, actualNodeId);
+
+            _selectedPeerNodeId = actualNodeId;
+            SwitchChat(actualNodeId);
+            return actualNodeId;
+        }
+
+        private void MergePeerIdentity(string sourceNodeId, string targetNodeId)
+        {
+            if (string.IsNullOrWhiteSpace(sourceNodeId) ||
+                string.IsNullOrWhiteSpace(targetNodeId) ||
+                string.Equals(sourceNodeId, targetNodeId, StringComparison.Ordinal))
+                return;
+
+            if (_peerChats.Remove(sourceNodeId, out var sourceChat))
+            {
+                var targetChat = GetOrCreatePeerChat(targetNodeId);
+                foreach (var item in sourceChat)
+                    targetChat.Add(item);
+            }
+
+            if (_unreadPeers.Remove(sourceNodeId))
+                _unreadPeers.Add(targetNodeId);
+
+            if (_peerEndpointMap.Remove(sourceNodeId, out var endpoint))
+                _peerEndpointMap[targetNodeId] = endpoint;
+
+            if (_peerVoicePortMap.Remove(sourceNodeId, out var voicePort))
+                _peerVoicePortMap[targetNodeId] = voicePort;
+
+            if (_selectedPeerNodeId == sourceNodeId)
+                _selectedPeerNodeId = targetNodeId;
+
+            if (_activeChatPeer == sourceNodeId)
+            {
+                _activeChatPeer = null;
+                SwitchChat(targetNodeId);
+            }
+        }
+
+        private IPEndPoint? ResolveConnectedPeerEndPoint(string nodeId)
+        {
+            if (string.IsNullOrWhiteSpace(nodeId))
+                return null;
+
+            if (_peerEndpointMap.TryGetValue(nodeId, out var cached))
+                return cached;
+
+            var endpoint = _connections?.GetPeerEndPoint(nodeId);
+            if (endpoint != null)
+                _peerEndpointMap[nodeId] = endpoint;
+            return endpoint;
+        }
+
+        private IPAddress? ResolveConnectedPeerAddress(string nodeId) =>
+            ResolveConnectedPeerEndPoint(nodeId)?.Address;
+
+        private static int ParseVoicePortPayload(string payload)
+        {
+            if (int.TryParse(payload, out var port) && port > 0)
+                return port;
+
+            var colonIdx = payload.LastIndexOf(':');
+            return colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out port) && port > 0
+                ? port
+                : 45679;
         }
 
         private async Task TryAutoConnectPeerAsync(PeerInfo peer)

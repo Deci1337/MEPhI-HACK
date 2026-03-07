@@ -13,6 +13,9 @@ public sealed class RetryPolicy : IDisposable
     private readonly ConcurrentDictionary<Guid, PendingPacket> _pending = new();
     private readonly Timer _timer;
 
+    /// <summary>Fired when a packet exhausts all retries and transitions to Failed state.</summary>
+    public event Action<Guid>? RetryExhausted;
+
     public RetryPolicy(ITransport transport, IMessageStore messageStore)
     {
         _transport = transport;
@@ -49,6 +52,7 @@ public sealed class RetryPolicy : IDisposable
                 pending.State = AckWaitState.Failed;
                 _messageStore.UpdateDeliveryState(pending.Envelope.MessageId, MessageDeliveryState.Failed);
                 _pending.TryRemove(new KeyValuePair<Guid, PendingPacket>(id, pending));
+                RetryExhausted?.Invoke(id);
                 continue;
             }
 
@@ -56,6 +60,14 @@ public sealed class RetryPolicy : IDisposable
             pending.LastAttemptAt = now;
             _ = _transport.SendAsync(pending.Envelope, pending.TargetNodeId);
         }
+    }
+
+    /// <summary>Expires all pending timeouts and ticks the retry loop. Internal — used by tests only.</summary>
+    internal void ForceTick()
+    {
+        foreach (var p in _pending.Values)
+            p.LastAttemptAt = DateTimeOffset.MinValue;
+        OnTick(null);
     }
 
     public void Dispose() => _timer.Dispose();

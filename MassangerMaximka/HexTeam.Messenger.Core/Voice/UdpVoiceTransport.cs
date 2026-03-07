@@ -8,11 +8,12 @@ namespace HexTeam.Messenger.Core.Voice;
 public sealed class UdpVoiceTransport : IDisposable
 {
     private const int DefaultVoicePort = 45679;
-    private const int JitterBufferSize = 2;
+    private const int JitterBufferSize = 10;
 
     private readonly ILogger<UdpVoiceTransport> _logger;
     private readonly int _listenPort;
-    private UdpClient? _udpClient;
+    private UdpClient _udpClient;
+    private readonly int _actualPort;
     private CancellationTokenSource? _cts;
     private IPEndPoint? _remoteEndPoint;
 
@@ -20,9 +21,16 @@ public sealed class UdpVoiceTransport : IDisposable
     private int _sequenceNumber;
 
     public bool IsActive { get; private set; }
-    public int ListenPort => _actualPort ?? _listenPort;
-    private int? _actualPort;
+    public int ListenPort => _actualPort;
     public VoiceMetrics Metrics { get; } = new();
+
+    // Extra endpoints for channel multicast (in addition to primary _remoteEndPoint)
+    private readonly List<IPEndPoint> _extraEndPoints = [];
+    public void SetExtraEndPoints(IEnumerable<IPEndPoint> endpoints)
+    {
+        lock (_extraEndPoints) { _extraEndPoints.Clear(); _extraEndPoints.AddRange(endpoints); }
+    }
+    public void ClearExtraEndPoints() { lock (_extraEndPoints) _extraEndPoints.Clear(); }
 
     public event Action<byte[]>? FrameReceived;
 
@@ -30,6 +38,9 @@ public sealed class UdpVoiceTransport : IDisposable
     {
         _logger = logger;
         _listenPort = listenPort;
+        _udpClient = BindUdpClient(_listenPort);
+        _actualPort = (_udpClient.Client.LocalEndPoint as IPEndPoint)?.Port ?? listenPort;
+        _logger.LogInformation("Voice transport pre-bound on :{Port}", _actualPort);
     }
 
     public void Start(IPEndPoint remoteEndPoint)
@@ -40,17 +51,33 @@ public sealed class UdpVoiceTransport : IDisposable
         _cts = new CancellationTokenSource();
         _sequenceNumber = 0;
 
-        _udpClient = BindUdpClient(_listenPort);
-        _actualPort = (_udpClient.Client.LocalEndPoint as IPEndPoint)?.Port;
+        if (_udpClient?.Client == null || !_udpClient.Client.IsBound)
+        {
+            _udpClient = BindUdpClient(_listenPort);
+        }
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
-        _logger.LogInformation("Voice transport started on :{Port} (configured={Cfg}), remote={EP}",
-            _actualPort, _listenPort, remoteEndPoint);
+        _logger.LogInformation("Voice transport started on :{Port}, remote={EP}",
+            _actualPort, remoteEndPoint);
+    }
+
+    /// <summary>Start receiving without a primary remote (for channel calls using extraEndPoints only).</summary>
+    public void StartListening()
+    {
+        if (IsActive) Stop();
+        _remoteEndPoint = null;
+        _cts = new CancellationTokenSource();
+        _sequenceNumber = 0;
+        if (_udpClient?.Client == null || !_udpClient.Client.IsBound)
+            _udpClient = BindUdpClient(_listenPort);
+        IsActive = true;
+        _ = ReceiveLoopAsync(_cts.Token);
+        _logger.LogInformation("Voice transport listening (channel mode) on :{Port}", _actualPort);
     }
 
     public async Task SendFrameAsync(byte[] pcmData)
     {
-        if (_udpClient == null || _remoteEndPoint == null || !IsActive) return;
+        if (_udpClient == null || !IsActive) return;
 
         var frame = new VoiceFrame
         {
@@ -62,7 +89,12 @@ public sealed class UdpVoiceTransport : IDisposable
         var packet = SerializeFrame(frame);
         try
         {
-            await _udpClient.SendAsync(packet, packet.Length, _remoteEndPoint);
+            if (_remoteEndPoint != null)
+                await _udpClient.SendAsync(packet, packet.Length, _remoteEndPoint);
+            List<IPEndPoint> extras;
+            lock (_extraEndPoints) extras = [.._extraEndPoints];
+            foreach (var ep in extras)
+                await _udpClient.SendAsync(packet, packet.Length, ep);
             Metrics.FramesSent++;
         }
         catch (Exception ex)
@@ -90,7 +122,7 @@ public sealed class UdpVoiceTransport : IDisposable
                 while (_jitterBuffer.Count > JitterBufferSize)
                     _jitterBuffer.TryDequeue(out _);
 
-                if (_jitterBuffer.TryDequeue(out var playFrame))
+                while (_jitterBuffer.TryDequeue(out var playFrame))
                     FrameReceived?.Invoke(playFrame.Data);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -105,11 +137,11 @@ public sealed class UdpVoiceTransport : IDisposable
     {
         IsActive = false;
         _cts?.Cancel();
-        try { _udpClient?.Close(); } catch { }
-        try { _udpClient?.Dispose(); } catch { }
-        _udpClient = null;
+        _cts?.Dispose();
+        _cts = null;
+        _remoteEndPoint = null;
         while (_jitterBuffer.TryDequeue(out _)) { }
-        _logger.LogInformation("Voice transport stopped");
+        _logger.LogInformation("Voice transport stopped (port :{Port} kept bound)", _actualPort);
     }
 
     private static UdpClient BindUdpClient(int preferredPort)
@@ -149,7 +181,8 @@ public sealed class UdpVoiceTransport : IDisposable
     public void Dispose()
     {
         Stop();
-        _cts?.Dispose();
+        try { _udpClient.Close(); } catch { }
+        try { _udpClient.Dispose(); } catch { }
     }
 }
 
