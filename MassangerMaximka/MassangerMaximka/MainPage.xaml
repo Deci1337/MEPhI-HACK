@@ -96,17 +96,13 @@
                                             <RoundRectangle CornerRadius="6" />
                                         </Border.StrokeShape>
                                     </Border>
-                                    <!-- Name + status (2-line) -->
-                                    <StackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                                        <Label Text="{Binding ., Converter={StaticResource PeerNameConverter}}"
-                                               FontSize="13" FontAttributes="Bold"
-                                               TextColor="White"
-                                               LineBreakMode="TailTruncation" />
-                                        <Label Text="{Binding ., Converter={StaticResource PeerStatusConverter}}"
-                                               FontSize="10"
-                                               TextColor="{StaticResource SeaShellMuted}"
-                                               LineBreakMode="TailTruncation" />
-                                    </StackLayout>
+                                    <!-- Peer title -->
+                                    <Label Grid.Column="1"
+                                           Text="{Binding}"
+                                           FontSize="13" FontAttributes="Bold"
+                                           TextColor="White"
+                                           LineBreakMode="TailTruncation"
+                                           VerticalOptions="Center" />
                                 </Grid>
                             </Border>
                         </Grid>
@@ -286,7 +282,7 @@
                                         <Label Text="{Binding Text}"
                                                LineBreakMode="WordWrap"
                                                FontSize="{OnIdiom Phone=14, Default=14}"
-                                               TextColor="{Binding BubbleTextColor}" />
+                                               TextColor="White" />
                                         <Label Text="{Binding Status}"
                                                IsVisible="{Binding HasStatus}"
                                                FontSize="10" TextColor="{StaticResource SeaShellMuted}"
@@ -307,13 +303,13 @@
                                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                                         <Button Grid.Column="0" Text="▶"
                                                 BackgroundColor="Transparent"
-                                                BorderColor="{Binding BubbleTextColor}" BorderWidth="1"
-                                                TextColor="{Binding BubbleTextColor}"
+                                                BorderColor="White" BorderWidth="1"
+                                                TextColor="White"
                                                 FontSize="14" Padding="12,6" CornerRadius="6"
                                                 CommandParameter="{Binding VoicePath}"
                                                 Clicked="OnVoiceItemPlayClicked" />
                                         <Label Grid.Column="1" Text="{Binding Text}"
-                                               FontSize="13" TextColor="{Binding BubbleTextColor}"
+                                               FontSize="13" TextColor="White"
                                                VerticalOptions="Center" LineBreakMode="TailTruncation" />
                                     </Grid>
                                 </Border>
@@ -330,7 +326,7 @@
                                     </Border.StrokeShape>
                                     <StackLayout Spacing="8">
                                         <Label Text="{Binding Text}"
-                                               FontSize="12" TextColor="{Binding BubbleTextColor}"
+                                               FontSize="12" TextColor="White"
                                                LineBreakMode="TailTruncation" />
                                         <Image Source="{Binding ImageBytes, Converter={StaticResource ByteArrayToImageSourceConverter}}"
                                                HeightRequest="240" WidthRequest="240"
