@@ -982,6 +982,11 @@ namespace MassangerMaximka
             }
             try
             {
+                RecordBtnBg.BackgroundColor = Color.FromArgb("#1A4A20");
+                RecordBtnBg.Stroke = Color.FromArgb("#2ECC71");
+                RecordBtnBg.Shadow = new Shadow { Brush = Color.FromArgb("#2ECC71"), Radius = 10, Opacity = 0.8f };
+                RecordBtnIcon.Fill = Colors.White;
+
                 var dir = Path.Combine(FileSystem.Current.AppDataDirectory, "VoiceMessages");
                 Directory.CreateDirectory(dir);
                 _voiceRecordPath = Path.Combine(dir, $"voice_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
@@ -1002,9 +1007,7 @@ namespace MassangerMaximka
 
                 await _audioRecorder.StartAsync(CreateVoiceRecorderOptions());
                 _isRecordingVoice = true;
-                RecordBtn.BackgroundColor = Color.FromArgb("#F44336");
-                StopSendBtn.Text = "SEND";
-                StopSendBtn.BackgroundColor = Color.FromArgb("#1976D2");
+                // UI updated in start/stop methods
                 VoiceStatusLabel.Text = "Voice: RECORDING...";
                 TechLog(LogCat.System, $"Voice recording started -> temp file, final path {_voiceRecordPath}");
             }
@@ -1027,9 +1030,11 @@ namespace MassangerMaximka
                 var source = await _audioRecorder.StopAsync();
                 _isRecordingVoice = false;
                 _audioRecorder = null;
-                RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
-                StopSendBtn.Text = "STOP";
-                StopSendBtn.BackgroundColor = Color.FromArgb("#3A3530");
+                
+                RecordBtnBg.BackgroundColor = Colors.White;
+                RecordBtnBg.Stroke = Colors.Transparent;
+                RecordBtnBg.Shadow = new Shadow { Brush = Colors.Transparent, Opacity = 0 };
+                RecordBtnIcon.Fill = Colors.Black;
 
                 var path = await PersistVoiceRecordingAsync(source);
                 if (string.IsNullOrEmpty(path) || !File.Exists(path) || new FileInfo(path).Length <= 44)
@@ -1070,9 +1075,11 @@ namespace MassangerMaximka
             {
                 _isRecordingVoice = false;
                 _audioRecorder = null;
-                RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
-                StopSendBtn.Text = "STOP";
-                StopSendBtn.BackgroundColor = Color.FromArgb("#3A3530");
+                // Reset UI
+                RecordBtnBg.BackgroundColor = Colors.White;
+                RecordBtnBg.Stroke = Colors.Transparent;
+                RecordBtnBg.Shadow = new Shadow { Brush = Colors.Transparent, Opacity = 0 };
+                RecordBtnIcon.Fill = Colors.Black;
                 AppendChat($"[Error] Voice send failed: {ex.Message}");
                 TechLogError(LogCat.System, $"Voice send error: {ex.Message}");
                 VoiceStatusLabel.Text = "Voice: idle";
@@ -1138,8 +1145,9 @@ namespace MassangerMaximka
             var voicePort = _voice?.ListenPort ?? 45679;
             await SendCallSignalAsync(nodeId, $"{CallRequestPrefix}{voicePort}");
 
-            CallBtn.Text = "Cancel";
-            CallBtn.BackgroundColor = Color.FromArgb("#E65100");
+            var converter = new Microsoft.Maui.Controls.Shapes.PathGeometryConverter();
+            CallBtnIcon.Data = (Microsoft.Maui.Controls.Shapes.Geometry)converter.ConvertFromInvariantString("M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z");
+            CallBtnBg.BackgroundColor = Color.FromArgb("#333333");
             VoiceStatusLabel.Text = $"Calling {nodeId}...";
             AppendChat($"[Call] Calling {nodeId}...");
             TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} voice_port={voicePort}");
@@ -1186,8 +1194,9 @@ namespace MassangerMaximka
             RecordBtn.IsVisible = false;
             StopSendBtn.IsVisible = false;
             PttBtn.IsVisible = true;
-            CallBtn.Text = "Hang Up";
-            CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
+            var converter = new Microsoft.Maui.Controls.Shapes.PathGeometryConverter();
+            CallBtnIcon.Data = (Microsoft.Maui.Controls.Shapes.Geometry)converter.ConvertFromInvariantString("M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z");
+            CallBtnBg.BackgroundColor = Color.FromArgb("#333333");
             VoiceStatusLabel.Text = "Channel call - Hold Talk to speak";
             AppendToChannelChat($"[Call] Channel call started");
             TechLog(LogCat.Network, $"Channel call started, voice_port={voicePort}, members={_channelMembers.Count}");
@@ -1235,8 +1244,9 @@ namespace MassangerMaximka
             RecordBtn.IsVisible = false;
             StopSendBtn.IsVisible = false;
             PttBtn.IsVisible = true;
-            CallBtn.Text = "Hang Up";
-            CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
+            var converter = new Microsoft.Maui.Controls.Shapes.PathGeometryConverter();
+            CallBtnIcon.Data = (Microsoft.Maui.Controls.Shapes.Geometry)converter.ConvertFromInvariantString("M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z");
+            CallBtnBg.BackgroundColor = Color.FromArgb("#333333");
             VoiceStatusLabel.Text = "Hold Talk to speak";
             var localVoicePort = _voice?.ListenPort ?? 45679;
             AppendChat($"[Call] Walkie-talkie with {ResolveDisplayName(nodeId)}");
@@ -1256,8 +1266,9 @@ namespace MassangerMaximka
             RecordBtn.IsVisible = true;
             StopSendBtn.IsVisible = true;
             PttBtn.IsVisible = false;
-            CallBtn.Text = "Call";
-            CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
+            var converter = new Microsoft.Maui.Controls.Shapes.PathGeometryConverter();
+            CallBtnIcon.Data = (Microsoft.Maui.Controls.Shapes.Geometry)converter.ConvertFromInvariantString("M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z");
+            CallBtnBg.BackgroundColor = Colors.Transparent;
             VoiceStatusLabel.Text = "Voice: idle";
             if (_activeChannelId != null)
                 AppendToChannelChat("[Call] Channel call ended");
@@ -1349,8 +1360,9 @@ namespace MassangerMaximka
             RecordBtn.IsVisible = true;
             StopSendBtn.IsVisible = true;
             PttBtn.IsVisible = false;
-            CallBtn.Text = "Call";
-            CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
+            var converter = new Microsoft.Maui.Controls.Shapes.PathGeometryConverter();
+            CallBtnIcon.Data = (Microsoft.Maui.Controls.Shapes.Geometry)converter.ConvertFromInvariantString("M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z");
+            CallBtnBg.BackgroundColor = Colors.Transparent;
             VoiceStatusLabel.Text = "Voice: idle";
         }
 
@@ -1364,8 +1376,9 @@ namespace MassangerMaximka
         private async void OnPttPressed(object? sender, EventArgs e)
         {
             if (_voiceCallManager == null || !_isInCall) return;
-            PttBtn.BackgroundColor = Color.FromArgb("#F44336");
-            PttBtn.Text = "TALKING";
+            PttBtn.BackgroundColor = Color.FromArgb("#1A4A20");
+            PttBtn.TextColor = Colors.White;
+            PttBtn.Text = "🎤 TALKING";
             VoiceStatusLabel.Text = "TALKING...";
             if (_activeChannelId != null)
             {
@@ -1380,8 +1393,9 @@ namespace MassangerMaximka
         private async void OnPttReleased(object? sender, EventArgs e)
         {
             if (_voiceCallManager == null) return;
-            PttBtn.BackgroundColor = Color.FromArgb("#1976D2");
-            PttBtn.Text = "Talk";
+            PttBtn.BackgroundColor = Colors.White;
+            PttBtn.TextColor = Colors.Black;
+            PttBtn.Text = "🎤 HOLD TO TALK";
             VoiceStatusLabel.Text = "Hold Talk to speak";
             await _voiceCallManager.StopTalkingAsync();
             BroadcastPttSignal(PttEndSignal);

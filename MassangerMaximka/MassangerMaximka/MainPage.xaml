@@ -10,6 +10,17 @@
     <ContentPage.Resources>
         <ResourceDictionary>
             <conv:ByteArrayToImageSourceConverter x:Key="ByteArrayToImageSourceConverter" />
+            <conv:StringToAvatarBrushConverter x:Key="StringToAvatarBrushConverter" />
+            
+            <Style TargetType="Label">
+                <Setter Property="FontFamily" Value="JetBrains Mono, monospace" />
+            </Style>
+            <Style TargetType="Button">
+                <Setter Property="FontFamily" Value="JetBrains Mono, monospace" />
+            </Style>
+            <Style TargetType="Entry">
+                <Setter Property="FontFamily" Value="JetBrains Mono, monospace" />
+            </Style>
         </ResourceDictionary>
     </ContentPage.Resources>
 
@@ -21,6 +32,7 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="{OnIdiom Phone=0, Default=280}" />
             <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="{OnIdiom Phone=0, Default=320}" />
         </Grid.ColumnDefinitions>
 
         <!-- ====== LEFT: Peers sidebar ====== -->
@@ -76,18 +88,11 @@
                                 <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                                     <!-- Avatar circle -->
                                     <Border Grid.Column="0" WidthRequest="36" HeightRequest="36"
-                                            BackgroundColor="{StaticResource CoalInput}"
+                                            Background="{Binding ., Converter={StaticResource StringToAvatarBrushConverter}}"
                                             StrokeThickness="1" Stroke="{StaticResource CoalBorder}" VerticalOptions="Center">
                                         <Border.StrokeShape>
                                             <RoundRectangle CornerRadius="18" />
                                         </Border.StrokeShape>
-                                        <Label FontSize="14" FontAttributes="Bold"
-                                               TextColor="White"
-                                               HorizontalOptions="Center" VerticalOptions="Center">
-                                            <Label.Text>
-                                                <Binding Path="." StringFormat="{}{0}" />
-                                            </Label.Text>
-                                        </Label>
                                     </Border>
                                     <!-- Name + status -->
                                     <Label Grid.Column="1" Text="{Binding}"
@@ -168,20 +173,22 @@
                            FontSize="11" TextColor="{StaticResource SeaShellMuted}" />
                 </StackLayout>
                 <!-- Voice record button -->
-                <Button Grid.Column="2" x:Name="RecordBtn" Text="⬤"
-                        Clicked="OnRecordVoiceClicked"
-                        BackgroundColor="White"
-                        TextColor="Black"
-                        FontSize="14" Padding="12,8" CornerRadius="6"
-                        HeightRequest="40" WidthRequest="48" />
+                <Grid Grid.Column="2" x:Name="RecordBtn" WidthRequest="44" HeightRequest="40">
+                    <Border x:Name="RecordBtnBg" BackgroundColor="White" StrokeThickness="0">
+                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    </Border>
+                    <Path x:Name="RecordBtnIcon" Data="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z" 
+                          Fill="Black" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
+                    <Button BackgroundColor="Transparent" Clicked="OnRecordVoiceClicked" />
+                </Grid>
                 <!-- Stop button -->
-                <Button Grid.Column="3" x:Name="StopSendBtn" Text="⬛"
-                        Clicked="OnStopSendVoiceClicked"
-                        BackgroundColor="Transparent"
-                        BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="White"
-                        FontSize="14" Padding="12,8" CornerRadius="6"
-                        HeightRequest="40" WidthRequest="48" />
+                <Grid Grid.Column="3" x:Name="StopSendBtn" WidthRequest="44" HeightRequest="40">
+                    <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
+                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    </Border>
+                    <Path Data="M6 6h12v12H6z" Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
+                    <Button BackgroundColor="Transparent" Clicked="OnStopSendVoiceClicked" />
+                </Grid>
                 <!-- PTT button -->
                 <Button Grid.Column="4" x:Name="PttBtn" Text="🎤 HOLD TO TALK"
                         IsVisible="False"
@@ -191,13 +198,14 @@
                         FontSize="12" Padding="16,8" CornerRadius="6"
                         HeightRequest="40" />
                 <!-- Call button -->
-                <Button Grid.Column="5" x:Name="CallBtn" Text="☏"
-                        Clicked="OnCallButtonClicked"
-                        BackgroundColor="Transparent"
-                        BorderColor="White" BorderWidth="1"
-                        TextColor="White"
-                        FontSize="18" Padding="12,6" CornerRadius="6"
-                        HeightRequest="40" WidthRequest="48" />
+                <Grid Grid.Column="5" WidthRequest="44" HeightRequest="40">
+                    <Border x:Name="CallBtnBg" BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
+                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    </Border>
+                    <Path x:Name="CallBtnIcon" Data="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" 
+                          Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
+                    <Button BackgroundColor="Transparent" Clicked="OnCallButtonClicked" />
+                </Grid>
             </Grid>
             <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
 
@@ -338,18 +346,22 @@
                   ColumnSpacing="8" BackgroundColor="{StaticResource CoalPanel}">
                 <BoxView Grid.ColumnSpan="5" HeightRequest="1"
                          Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
-                <Button Grid.Column="0" Text="📎" Clicked="OnSendTestFileClicked"
-                        BackgroundColor="Transparent"
-                        BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="White"
-                        FontSize="16" Padding="12,8" CornerRadius="6"
-                        HeightRequest="42" WidthRequest="46" />
-                <Button Grid.Column="1" Text="🖼" Clicked="OnSendPhotoClicked"
-                        BackgroundColor="Transparent"
-                        BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="White"
-                        FontSize="16" Padding="12,8" CornerRadius="6"
-                        HeightRequest="42" WidthRequest="46" />
+                <Grid Grid.Column="0" WidthRequest="44" HeightRequest="42">
+                    <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
+                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    </Border>
+                    <Path Data="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z" 
+                          Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
+                    <Button BackgroundColor="Transparent" Clicked="OnSendTestFileClicked" />
+                </Grid>
+                <Grid Grid.Column="1" WidthRequest="44" HeightRequest="42">
+                    <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
+                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    </Border>
+                    <Path Data="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" 
+                          Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
+                    <Button BackgroundColor="Transparent" Clicked="OnSendPhotoClicked" />
+                </Grid>
                 <Border Grid.Column="2"
                         BackgroundColor="{StaticResource CoalInput}"
                         StrokeThickness="1" Stroke="{StaticResource CoalBorder}"
@@ -364,17 +376,22 @@
                            FontSize="{OnIdiom Phone=14, Default=14}"
                            Completed="OnSendClicked" />
                 </Border>
-                <Button Grid.Column="3" Text="✕" Clicked="OnClearChatClicked"
-                        BackgroundColor="Transparent"
-                        BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                        TextColor="{StaticResource SeaShellMuted}"
-                        FontSize="14" Padding="12,8" CornerRadius="6"
-                        HeightRequest="42" WidthRequest="46" />
-                <Button Grid.Column="4" Text="➔" Clicked="OnSendClicked"
-                        BackgroundColor="White"
-                        TextColor="Black"
-                        FontSize="18" Padding="16,8" CornerRadius="6"
-                        HeightRequest="42" WidthRequest="54" />
+                <Grid Grid.Column="3" WidthRequest="44" HeightRequest="42">
+                    <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
+                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    </Border>
+                    <Path Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" 
+                          Fill="{StaticResource SeaShellMuted}" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
+                    <Button BackgroundColor="Transparent" Clicked="OnClearChatClicked" />
+                </Grid>
+                <Grid Grid.Column="4" WidthRequest="54" HeightRequest="42">
+                    <Border BackgroundColor="White" StrokeThickness="0">
+                        <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    </Border>
+                    <Path Data="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" 
+                          Fill="Black" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" Margin="4,0,0,0" />
+                    <Button BackgroundColor="Transparent" Clicked="OnSendClicked" />
+                </Grid>
             </Grid>
 
             <!-- Message input bar (narrow/mobile) -->
@@ -397,25 +414,40 @@
                                FontSize="15" MinimumHeightRequest="48"
                                Completed="OnSendClicked" />
                     </Border>
-                    <Button Grid.Column="1" Text="➔" Clicked="OnSendClicked"
-                            BackgroundColor="White"
-                            TextColor="Black"
-                            FontSize="20" Padding="16,10" CornerRadius="6"
-                            HeightRequest="48" />
+                    <Grid Grid.Column="1" WidthRequest="54" HeightRequest="48">
+                        <Border BackgroundColor="White" StrokeThickness="0">
+                            <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                        </Border>
+                        <Path Data="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" 
+                              Fill="Black" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.9" Margin="4,0,0,0" />
+                        <Button BackgroundColor="Transparent" Clicked="OnSendClicked" />
+                    </Grid>
                 </Grid>
                 <HorizontalStackLayout Spacing="10">
-                    <Button Text="📎" Clicked="OnSendTestFileClicked"
-                            BackgroundColor="Transparent" BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                            TextColor="White"
-                            FontSize="18" Padding="16,10" CornerRadius="6" />
-                    <Button Text="🖼" Clicked="OnSendPhotoClicked"
-                            BackgroundColor="Transparent" BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                            TextColor="White"
-                            FontSize="18" Padding="16,10" CornerRadius="6" />
-                    <Button Text="✕" Clicked="OnClearChatClicked"
-                            BackgroundColor="Transparent" BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
-                            TextColor="{StaticResource SeaShellMuted}"
-                            FontSize="18" Padding="16,10" CornerRadius="6" />
+                    <Grid WidthRequest="48" HeightRequest="48">
+                        <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
+                            <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                        </Border>
+                        <Path Data="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z" 
+                              Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.9" />
+                        <Button BackgroundColor="Transparent" Clicked="OnSendTestFileClicked" />
+                    </Grid>
+                    <Grid WidthRequest="48" HeightRequest="48">
+                        <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
+                            <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                        </Border>
+                        <Path Data="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" 
+                              Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.9" />
+                        <Button BackgroundColor="Transparent" Clicked="OnSendPhotoClicked" />
+                    </Grid>
+                    <Grid WidthRequest="48" HeightRequest="48">
+                        <Border BackgroundColor="Transparent" StrokeThickness="1" Stroke="{StaticResource CoalBorder}">
+                            <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                        </Border>
+                        <Path Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" 
+                              Fill="{StaticResource SeaShellMuted}" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.9" />
+                        <Button BackgroundColor="Transparent" Clicked="OnClearChatClicked" />
+                    </Grid>
                 </HorizontalStackLayout>
             </VerticalStackLayout>
 
@@ -442,56 +474,59 @@
                         TextColor="White" FontAttributes="Bold"
                         FontSize="9" Padding="8,4" CornerRadius="4" />
             </Grid>
+        </Grid>
 
-            <!-- Diagnostics panel -->
-            <Grid x:Name="DiagnosticsPanel" Grid.Row="6"
-                  RowDefinitions="Auto,Auto,*" BackgroundColor="{StaticResource CoalPanel}">
-                <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" />
-                <!-- Metrics bar -->
-                <Grid Grid.Row="1" Padding="16,8,16,8"
-                      ColumnDefinitions="*,*,*,*" ColumnSpacing="8"
-                      BackgroundColor="{StaticResource CoalPanel}">
-                    <Border Grid.Column="0" BackgroundColor="{StaticResource CoalSurface}"
-                            StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,6">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="4" /></Border.StrokeShape>
-                        <StackLayout Spacing="2">
-                            <Label Text="RTT" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
-                            <Label x:Name="MetricRttLabel" Text="--" FontSize="13"
-                                   FontAttributes="Bold" TextColor="White" />
-                        </StackLayout>
-                    </Border>
-                    <Border Grid.Column="1" BackgroundColor="{StaticResource CoalSurface}"
-                            StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,6">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="4" /></Border.StrokeShape>
-                        <StackLayout Spacing="2">
-                            <Label Text="LOSS" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
-                            <Label x:Name="MetricLossLabel" Text="--" FontSize="13"
-                                   FontAttributes="Bold" TextColor="White" />
-                        </StackLayout>
-                    </Border>
-                    <Border Grid.Column="2" BackgroundColor="{StaticResource CoalSurface}"
-                            StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,6">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="4" /></Border.StrokeShape>
-                        <StackLayout Spacing="2">
-                            <Label Text="QUALITY" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
-                            <Label x:Name="MetricQualityLabel" Text="--" FontSize="13"
-                                   FontAttributes="Bold" TextColor="White" />
-                        </StackLayout>
-                    </Border>
-                    <Border Grid.Column="3" BackgroundColor="{StaticResource CoalSurface}"
-                            StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,6">
-                        <Border.StrokeShape><RoundRectangle CornerRadius="4" /></Border.StrokeShape>
-                        <StackLayout Spacing="2">
-                            <Label Text="RETRIES" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
-                            <Label x:Name="MetricRetriesLabel" Text="--" FontSize="13"
-                                   FontAttributes="Bold" TextColor="White" />
-                        </StackLayout>
-                    </Border>
-                </Grid>
-                <ScrollView Grid.Row="2" x:Name="TechLogScrollView" Padding="16,8">
-                    <VerticalStackLayout x:Name="TechLogStack" Spacing="2" />
-                </ScrollView>
+        <!-- ====== RIGHT: Logs panel (Desktop only) ====== -->
+        <Grid x:Name="DiagnosticsPanel" Grid.Column="2" Grid.Row="0" Grid.RowSpan="2"
+              BackgroundColor="{StaticResource CoalPanel}"
+              RowDefinitions="Auto,Auto,*" RowSpacing="0"
+              IsVisible="{OnIdiom Phone=False, Default=True}">
+            <BoxView Grid.Row="0" WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="Start" Grid.RowSpan="3" />
+            
+            <Label Grid.Row="0" Text="DIAGNOSTICS" FontSize="11" FontAttributes="Bold" TextColor="{StaticResource SeaShellMuted}" Padding="20,24,20,16" CharacterSpacing="1.2" />
+            <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
+
+            <!-- Metrics bar -->
+            <Grid Grid.Row="1" Padding="16,16,16,16"
+                  ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="12">
+                <Border Grid.Row="0" Grid.Column="0" BackgroundColor="{StaticResource CoalSurface}"
+                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,8">
+                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    <StackLayout Spacing="2">
+                        <Label Text="RTT" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
+                        <Label x:Name="MetricRttLabel" Text="--" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                    </StackLayout>
+                </Border>
+                <Border Grid.Row="0" Grid.Column="1" BackgroundColor="{StaticResource CoalSurface}"
+                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,8">
+                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    <StackLayout Spacing="2">
+                        <Label Text="LOSS" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
+                        <Label x:Name="MetricLossLabel" Text="--" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                    </StackLayout>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="0" BackgroundColor="{StaticResource CoalSurface}"
+                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,8">
+                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    <StackLayout Spacing="2">
+                        <Label Text="QUALITY" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
+                        <Label x:Name="MetricQualityLabel" Text="--" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                    </StackLayout>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="1" BackgroundColor="{StaticResource CoalSurface}"
+                        StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="10,8">
+                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                    <StackLayout Spacing="2">
+                        <Label Text="RETRIES" FontSize="9" TextColor="{StaticResource SeaShellMuted}" FontAttributes="Bold" CharacterSpacing="1" />
+                        <Label x:Name="MetricRetriesLabel" Text="--" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                    </StackLayout>
+                </Border>
             </Grid>
+            <BoxView Grid.Row="1" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
+
+            <ScrollView Grid.Row="2" x:Name="TechLogScrollView" Padding="16,16">
+                <VerticalStackLayout x:Name="TechLogStack" Spacing="4" />
+            </ScrollView>
         </Grid>
     </Grid>
 </ContentPage>
