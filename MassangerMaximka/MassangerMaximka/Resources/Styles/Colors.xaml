@@ -15,8 +15,16 @@
     <Color x:Key="SeaShell">#FFF5EE</Color>
     <Color x:Key="SeaShellMuted">#7A7570</Color>
     <Color x:Key="AccentBlue">#4A90D9</Color>
-    <Color x:Key="DangerRed">#7A1F1F</Color>
-    <Color x:Key="SuccessGreen">#1A4A20</Color>
+    <Color x:Key="DangerRed">#E05252</Color>
+    <Color x:Key="DangerRedDark">#6B1F1F</Color>
+    <Color x:Key="SuccessGreen">#2ECC71</Color>
+    <Color x:Key="SuccessGreenDark">#1A5C38</Color>
+    <Color x:Key="AccentGreen">#3DDC84</Color>
+    <Color x:Key="AccentGreenDark">#1A5C38</Color>
+    <Color x:Key="AccentAmber">#F0A32A</Color>
+    <Color x:Key="AccentBlueDark">#2B4C8C</Color>
+    <Color x:Key="CoalElevated">#252840</Color>
+    <Color x:Key="SeaShellDim">#3C3F58</Color>
 
     <!-- Brand -->
     <Color x:Key="AppBackground">#181B1B</Color>

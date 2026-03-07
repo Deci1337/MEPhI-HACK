@@ -191,7 +191,7 @@
                                 <Border StrokeShape="Ellipse"
                                         Stroke="Transparent"
                                         HeightRequest="52" WidthRequest="52"
-                                        OverflowContent="Clip">
+                                        Padding="0">
                                     <Image Source="https://picsum.photos/seed/s25/52/52"
                                            HeightRequest="52" WidthRequest="52"
                                            Aspect="AspectFill"/>
@@ -268,7 +268,7 @@
                             <Grid Grid.Column="0" WidthRequest="52" HeightRequest="52">
                                 <Border StrokeShape="Ellipse" Stroke="Transparent"
                                         HeightRequest="52" WidthRequest="52"
-                                        OverflowContent="Clip">
+                                        Padding="0">
                                     <Image Source="https://picsum.photos/seed/lenovo/52/52"
                                            HeightRequest="52" WidthRequest="52"
                                            Aspect="AspectFill"/>
@@ -329,7 +329,7 @@
                             <Grid Grid.Column="0" WidthRequest="52" HeightRequest="52">
                                 <Border StrokeShape="Ellipse" Stroke="Transparent"
                                         HeightRequest="52" WidthRequest="52"
-                                        OverflowContent="Clip">
+                                        Padding="0">
                                     <Image Source="https://picsum.photos/seed/pixel8/52/52"
                                            HeightRequest="52" WidthRequest="52"
                                            Aspect="AspectFill"/>
@@ -390,7 +390,7 @@
                             <Grid Grid.Column="0" WidthRequest="52" HeightRequest="52">
                                 <Border StrokeShape="Ellipse" Stroke="Transparent"
                                         HeightRequest="52" WidthRequest="52"
-                                        OverflowContent="Clip">
+                                        Padding="0">
                                     <Image Source="https://picsum.photos/seed/poco/52/52"
                                            HeightRequest="52" WidthRequest="52"
                                            Aspect="AspectFill"/>
@@ -441,6 +441,8 @@
                             </Border>
                         </Grid>
                     </Border>
+
+                </VerticalStackLayout>
 
                 <!-- ── Instant Pairing block ── -->
                 <Border Margin="16,0,16,28"
