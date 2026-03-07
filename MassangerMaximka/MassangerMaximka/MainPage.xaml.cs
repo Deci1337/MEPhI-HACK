@@ -48,7 +48,7 @@ namespace MassangerMaximka
         private const string CallEnd = "\x1FCALL_END";
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
-        private readonly List<string> _chatLog = [];
+        private readonly ObservableCollection<ChatItem> _chatItems = [];
         private readonly Dictionary<string, System.Net.IPEndPoint> _peerEndpointMap = new();
         private int _techLogCount;
         private volatile bool _suppressTechLog;
@@ -57,6 +57,7 @@ namespace MassangerMaximka
         {
             InitializeComponent();
             PeersList.ItemsSource = _peers;
+            ChatList.ItemsSource = _chatItems;
             LoadSavedPeers();
         }
 
@@ -281,13 +282,11 @@ namespace MassangerMaximka
                     fileName.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
                 {
                     _lastReceivedVoicePath = savedPath;
-                    AppendChat($"[Voice Message] {fileName} -- press Play");
-                    PlayVoiceFile(savedPath);
+                    AppendVoiceMessage(savedPath, fromPeer: true);
                 }
                 else
                 {
-                    AppendChat($"[File Received] {fileName}");
-                    AppendChat($"  Saved: {savedPath}");
+                    AppendChat($"[File] {fileName}");
                 }
             });
         }
@@ -418,11 +417,7 @@ namespace MassangerMaximka
             TechLog(LogCat.Protocol, $"SENT id={msg.MessageId} status={msg.Status}");
         }
 
-        private void OnClearChatClicked(object? sender, EventArgs e)
-        {
-            _chatLog.Clear();
-            ChatLogLabel.Text = "";
-        }
+        private void OnClearChatClicked(object? sender, EventArgs e) => _chatItems.Clear();
 
         private async void OnSendTestFileClicked(object? sender, EventArgs e)
         {
@@ -582,7 +577,7 @@ namespace MassangerMaximka
 
                 var transfer = await _files.SendFileAsync(toNodeId, path);
                 _lastTransferId = transfer.TransferId;
-                AppendChat($"[Voice] Sent voice message to {toNodeId}");
+                AppendVoiceMessage(path, fromPeer: false);
                 VoiceStatusLabel.Text = "Voice: sent";
                 TechLog(LogCat.Protocol, $"VOICE SENT id={transfer.TransferId}");
             }
@@ -850,9 +845,27 @@ namespace MassangerMaximka
 
         private void AppendChat(string line)
         {
-            _chatLog.Add($"{DateTime.Now:HH:mm:ss} {line}");
-            while (_chatLog.Count > 50) _chatLog.RemoveAt(0);
-            ChatLogLabel.Text = string.Join("\n", _chatLog);
+            _chatItems.Add(new ChatItem { Text = $"{DateTime.Now:HH:mm:ss} {line}" });
+            if (_chatItems.Count > 200) _chatItems.RemoveAt(0);
+            ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
+        }
+
+        private void AppendVoiceMessage(string filePath, bool fromPeer)
+        {
+            var name = Path.GetFileNameWithoutExtension(filePath);
+            var prefix = fromPeer ? "Received" : "Sent";
+            _chatItems.Add(new ChatItem
+            {
+                Text = $"{DateTime.Now:HH:mm:ss} {prefix}: {name}",
+                VoicePath = filePath
+            });
+            ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
+        }
+
+        private void OnVoiceItemPlayClicked(object? sender, EventArgs e)
+        {
+            if (sender is Button btn && btn.CommandParameter is string path)
+                PlayVoiceFile(path);
         }
 
         private void TechLog(LogCat cat, string text)
