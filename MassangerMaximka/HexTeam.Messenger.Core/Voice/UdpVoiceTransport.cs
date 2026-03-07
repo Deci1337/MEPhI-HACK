@@ -57,6 +57,7 @@ public sealed class UdpVoiceTransport : IDisposable
         }
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
+        _ = SendKeepAliveAsync(_cts.Token);
         _logger.LogInformation("Voice transport started on :{Port}, remote={EP}",
             _actualPort, remoteEndPoint);
     }
@@ -72,6 +73,7 @@ public sealed class UdpVoiceTransport : IDisposable
             _udpClient = BindUdpClient(_listenPort);
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
+        _ = SendKeepAliveAsync(_cts.Token);
         _logger.LogInformation("Voice transport listening (channel mode) on :{Port}", _actualPort);
     }
 
@@ -142,6 +144,51 @@ public sealed class UdpVoiceTransport : IDisposable
         _remoteEndPoint = null;
         while (_jitterBuffer.TryDequeue(out _)) { }
         _logger.LogInformation("Voice transport stopped (port :{Port} kept bound)", _actualPort);
+    }
+
+    private async Task SendKeepAliveAsync(CancellationToken ct)
+    {
+        var ping = SerializeFrame(new VoiceFrame
+        {
+            Sequence = 0,
+            TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Data = []
+        });
+
+        for (var burst = 0; burst < 3; burst++)
+        {
+            try
+            {
+                await SendPingToAllEndpoints(ping);
+                await Task.Delay(50, ct);
+            }
+            catch (OperationCanceledException) { return; }
+            catch { }
+        }
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(2000, ct);
+                await SendPingToAllEndpoints(ping);
+            }
+            catch (OperationCanceledException) { return; }
+            catch { }
+        }
+    }
+
+    private async Task SendPingToAllEndpoints(byte[] packet)
+    {
+        if (_udpClient == null) return;
+
+        if (_remoteEndPoint != null)
+            await _udpClient.SendAsync(packet, packet.Length, _remoteEndPoint);
+
+        List<IPEndPoint> extras;
+        lock (_extraEndPoints) extras = [.. _extraEndPoints];
+        foreach (var ep in extras)
+            await _udpClient.SendAsync(packet, packet.Length, ep);
     }
 
     private static UdpClient BindUdpClient(int preferredPort)

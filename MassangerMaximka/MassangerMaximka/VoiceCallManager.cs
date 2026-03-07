@@ -64,14 +64,29 @@ public sealed class VoiceCallManager : IDisposable
         try
         {
             _talkRecorder = _audioManager.CreateRecorder();
-            await _talkRecorder.StartAsync(new AudioRecorderOptions
+            try
             {
-                SampleRate = 16000,
-                Channels = ChannelType.Mono,
-                BitDepth = BitDepth.Pcm16bit,
-                Encoding = Plugin.Maui.Audio.Encoding.Wav,
-                ThrowIfNotSupported = false
-            });
+                await _talkRecorder.StartAsync(new AudioRecorderOptions
+                {
+                    SampleRate = 16000,
+                    Channels = ChannelType.Mono,
+                    BitDepth = BitDepth.Pcm16bit,
+                    Encoding = Plugin.Maui.Audio.Encoding.Wav,
+                    ThrowIfNotSupported = true
+                });
+            }
+            catch
+            {
+                _talkRecorder = _audioManager.CreateRecorder();
+                await _talkRecorder.StartAsync(new AudioRecorderOptions
+                {
+                    SampleRate = 44100,
+                    Channels = ChannelType.Mono,
+                    BitDepth = BitDepth.Pcm16bit,
+                    Encoding = Plugin.Maui.Audio.Encoding.Wav,
+                    ThrowIfNotSupported = false
+                });
+            }
             Log?.Invoke("PTT: recording...");
         }
         catch (Exception ex)
@@ -122,7 +137,19 @@ public sealed class VoiceCallManager : IDisposable
             }
 
             if (wavBytes == null || wavBytes.Length <= WavHelper.HeaderSize) return;
-            var pcm = WavHelper.StripHeader(wavBytes);
+
+            var info = WavHelper.ParseWav(wavBytes);
+            var pcm = info.PcmData;
+            if (pcm.Length == 0) return;
+
+            Log?.Invoke($"PTT raw: rate={info.SampleRate} ch={info.ChannelCount} bits={info.BitsPerSample} pcm={pcm.Length}B");
+
+            if (info.ChannelCount == 2 && info.BitsPerSample == 16)
+                pcm = WavHelper.StereoToMono(pcm);
+
+            if (info.SampleRate != WavHelper.SampleRate)
+                pcm = WavHelper.Resample16BitMono(pcm, info.SampleRate, WavHelper.SampleRate);
+
             if (pcm.Length == 0) return;
 
             int sent = 0;
