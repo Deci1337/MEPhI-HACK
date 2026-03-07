@@ -12,7 +12,8 @@ public sealed class UdpVoiceTransport : IDisposable
 
     private readonly ILogger<UdpVoiceTransport> _logger;
     private readonly int _listenPort;
-    private UdpClient? _udpClient;
+    private UdpClient _udpClient;
+    private readonly int _actualPort;
     private CancellationTokenSource? _cts;
     private IPEndPoint? _remoteEndPoint;
 
@@ -20,8 +21,7 @@ public sealed class UdpVoiceTransport : IDisposable
     private int _sequenceNumber;
 
     public bool IsActive { get; private set; }
-    public int ListenPort => _actualPort ?? _listenPort;
-    private int? _actualPort;
+    public int ListenPort => _actualPort;
     public VoiceMetrics Metrics { get; } = new();
 
     public event Action<byte[]>? FrameReceived;
@@ -30,6 +30,9 @@ public sealed class UdpVoiceTransport : IDisposable
     {
         _logger = logger;
         _listenPort = listenPort;
+        _udpClient = BindUdpClient(_listenPort);
+        _actualPort = (_udpClient.Client.LocalEndPoint as IPEndPoint)?.Port ?? listenPort;
+        _logger.LogInformation("Voice transport pre-bound on :{Port}", _actualPort);
     }
 
     public void Start(IPEndPoint remoteEndPoint)
@@ -40,12 +43,14 @@ public sealed class UdpVoiceTransport : IDisposable
         _cts = new CancellationTokenSource();
         _sequenceNumber = 0;
 
-        _udpClient = BindUdpClient(_listenPort);
-        _actualPort = (_udpClient.Client.LocalEndPoint as IPEndPoint)?.Port;
+        if (_udpClient?.Client == null || !_udpClient.Client.IsBound)
+        {
+            _udpClient = BindUdpClient(_listenPort);
+        }
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
-        _logger.LogInformation("Voice transport started on :{Port} (configured={Cfg}), remote={EP}",
-            _actualPort, _listenPort, remoteEndPoint);
+        _logger.LogInformation("Voice transport started on :{Port}, remote={EP}",
+            _actualPort, remoteEndPoint);
     }
 
     public async Task SendFrameAsync(byte[] pcmData)
@@ -105,11 +110,11 @@ public sealed class UdpVoiceTransport : IDisposable
     {
         IsActive = false;
         _cts?.Cancel();
-        try { _udpClient?.Close(); } catch { }
-        try { _udpClient?.Dispose(); } catch { }
-        _udpClient = null;
+        _cts?.Dispose();
+        _cts = null;
+        _remoteEndPoint = null;
         while (_jitterBuffer.TryDequeue(out _)) { }
-        _logger.LogInformation("Voice transport stopped");
+        _logger.LogInformation("Voice transport stopped (port :{Port} kept bound)", _actualPort);
     }
 
     private static UdpClient BindUdpClient(int preferredPort)
@@ -149,7 +154,8 @@ public sealed class UdpVoiceTransport : IDisposable
     public void Dispose()
     {
         Stop();
-        _cts?.Dispose();
+        try { _udpClient.Close(); } catch { }
+        try { _udpClient.Dispose(); } catch { }
     }
 }
 

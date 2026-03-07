@@ -47,6 +47,8 @@ namespace MassangerMaximka
         private const string CallAcceptLegacy = "\x1FCALL_ACCEPT";
         private const string CallReject = "\x1FCALL_REJECT";
         private const string CallEnd = "\x1FCALL_END";
+        private const string PttStartSignal = "\x1FPTT_START";
+        private const string PttEndSignal = "\x1FPTT_END";
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
         private ObservableCollection<ChatItem> _chatItems = [];
@@ -232,7 +234,10 @@ namespace MassangerMaximka
                     var colonIdx = payload.LastIndexOf(':');
                     var ipStr = colonIdx > 0 ? payload[..colonIdx] : payload;
                     var voicePort = colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out var vp) ? vp : 45679;
-                    if (!_isInCall && !_isCallingOut && IPAddress.TryParse(ipStr, out var callerIp))
+                    var callerIp = _peerEndpointMap.TryGetValue(msg.FromNodeId, out var tcpEp)
+                        ? tcpEp.Address
+                        : (IPAddress.TryParse(ipStr, out var parsed) ? parsed : null);
+                    if (!_isInCall && !_isCallingOut && callerIp != null)
                     {
                         _incomingCallFromNodeId = msg.FromNodeId;
                         _incomingCallerIp = callerIp;
@@ -259,7 +264,9 @@ namespace MassangerMaximka
                             if (colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out var peerVp))
                                 _callPeerVoicePort = peerVp;
                         }
-                        TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId} voice_port={_callPeerVoicePort}");
+                        if (_peerEndpointMap.TryGetValue(msg.FromNodeId, out var tcpEp))
+                            _callPeerIp = tcpEp.Address;
+                        TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId} ip={_callPeerIp} voice_port={_callPeerVoicePort}");
                         _ = StartCallAsync(_callPeerNodeId, _callPeerIp, _callPeerVoicePort);
                     }
                     return;
@@ -282,6 +289,21 @@ namespace MassangerMaximka
                     if (_isInCall) EndCall();
                     else if (_isCallingOut) ResetCallingState();
                     TechLog(LogCat.Protocol, $"CALL_END from {msg.FromNodeId}");
+                    return;
+                }
+
+                if (text == PttStartSignal)
+                {
+                    var peerName = ResolveDisplayName(msg.FromNodeId);
+                    VoiceStatusLabel.Text = $"{peerName} is talking...";
+                    TechLog(LogCat.Protocol, $"PTT_START from {msg.FromNodeId}");
+                    return;
+                }
+
+                if (text == PttEndSignal)
+                {
+                    VoiceStatusLabel.Text = _isInCall ? "Hold Talk to speak" : "Voice: idle";
+                    TechLog(LogCat.Protocol, $"PTT_END from {msg.FromNodeId}");
                     return;
                 }
 
@@ -791,11 +813,15 @@ namespace MassangerMaximka
         private async void OnAcceptCallClicked(object? sender, EventArgs e)
         {
             var fromNodeId = _incomingCallFromNodeId;
-            var callerIp = _incomingCallerIp;
             var callerVoicePort = _incomingCallerVoicePort;
             HideIncomingCallBanner();
 
-            if (string.IsNullOrEmpty(fromNodeId) || callerIp == null) return;
+            if (string.IsNullOrEmpty(fromNodeId)) return;
+
+            var callerIp = _peerEndpointMap.TryGetValue(fromNodeId, out var tcpEp)
+                ? tcpEp.Address
+                : _incomingCallerIp;
+            if (callerIp == null) return;
 
             var localIp = GetLocalIpAddress();
             var localVoicePort = _voice?.ListenPort ?? 45679;
@@ -803,8 +829,8 @@ namespace MassangerMaximka
             _callPeerNodeId = fromNodeId;
             _callPeerIp = callerIp;
             _callPeerVoicePort = callerVoicePort;
+            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice={localIp}:{localVoicePort} peer_tcp_ip={callerIp}");
             await StartCallAsync(fromNodeId, callerIp, callerVoicePort);
-            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice={localIp}:{localVoicePort}");
         }
 
         private async void OnDeclineCallClicked(object? sender, EventArgs e)
@@ -859,6 +885,7 @@ namespace MassangerMaximka
             PttBtn.BackgroundColor = Color.FromArgb("#F44336");
             PttBtn.Text = "TALKING";
             VoiceStatusLabel.Text = "TALKING...";
+            _ = SendCallSignalAsync(_callPeerNodeId, PttStartSignal);
             await _voiceCallManager.StartTalkingAsync();
         }
 
@@ -869,6 +896,7 @@ namespace MassangerMaximka
             PttBtn.Text = "Talk";
             VoiceStatusLabel.Text = "Hold Talk to speak";
             await _voiceCallManager.StopTalkingAsync();
+            _ = SendCallSignalAsync(_callPeerNodeId, PttEndSignal);
         }
 
         private static string GetLocalIpAddress()
