@@ -13,15 +13,18 @@
         </ResourceDictionary>
     </ContentPage.Resources>
 
-    <!-- Two-column on Desktop, stacked on Phone -->
-    <Grid ColumnSpacing="0" RowSpacing="0">
+    <Grid x:Name="RootLayout" ColumnSpacing="0" RowSpacing="0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="{OnIdiom Phone=140, Default=220}" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
         <!-- ====== LEFT: Peers sidebar ====== -->
-        <Grid Grid.Column="0" BackgroundColor="{StaticResource CoalPanel}"
+        <Grid x:Name="SidebarPanel" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" BackgroundColor="{StaticResource CoalPanel}"
               RowDefinitions="Auto,Auto,*,Auto" RowSpacing="0">
 
             <!-- Sidebar header -->
@@ -83,10 +86,10 @@
         </Grid>
 
         <!-- Vertical divider -->
-        <BoxView Grid.Column="0" WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="End" />
+        <BoxView x:Name="SidebarDivider" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="End" />
 
         <!-- ====== RIGHT: Chat panel ====== -->
-        <Grid Grid.Column="1" BackgroundColor="{StaticResource Coal}"
+        <Grid x:Name="ChatPanel" Grid.Column="1" Grid.Row="0" Grid.RowSpan="2" BackgroundColor="{StaticResource Coal}"
               RowDefinitions="Auto,Auto,Auto,3*,Auto,Auto,2*" RowSpacing="0">
 
             <!-- Chat header: selected peer + call controls -->
@@ -210,7 +213,7 @@
             </CollectionView>
 
             <!-- Message input bar -->
-            <Grid Grid.Row="4" Padding="8,6" ColumnDefinitions="Auto,Auto,*,Auto,Auto"
+            <Grid x:Name="MessageBarWide" Grid.Row="4" Padding="8,6" ColumnDefinitions="Auto,Auto,*,Auto,Auto"
                   ColumnSpacing="6" BackgroundColor="{StaticResource CoalPanel}">
                 <BoxView Grid.ColumnSpan="5" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
                 <Button Grid.Column="0" Text="File" Clicked="OnSendTestFileClicked"
@@ -237,8 +240,43 @@
                         Padding="14,6" CornerRadius="3" />
             </Grid>
 
+            <VerticalStackLayout x:Name="MessageBarNarrow" Grid.Row="4" IsVisible="False"
+                                 Padding="8,6" Spacing="6" BackgroundColor="{StaticResource CoalPanel}">
+                <BoxView HeightRequest="1" Color="{StaticResource CoalBorder}" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                    <Entry Grid.Column="0" x:Name="MessageEntryNarrow" Placeholder="Message..."
+                           BackgroundColor="{StaticResource CoalInput}"
+                           TextColor="{StaticResource SeaShell}"
+                           PlaceholderColor="{StaticResource SeaShellMuted}"
+                           FontSize="14"
+                           Completed="OnSendClicked" />
+                    <Button Grid.Column="1" Text="Send" Clicked="OnSendClicked"
+                            BackgroundColor="{StaticResource AccentBlue}"
+                            TextColor="{StaticResource SeaShell}"
+                            FontSize="12"
+                            Padding="14,10" CornerRadius="3" />
+                </Grid>
+                <HorizontalStackLayout Spacing="6">
+                    <Button Text="File" Clicked="OnSendTestFileClicked"
+                            HorizontalOptions="Start"
+                            BackgroundColor="{StaticResource CoalSurface}"
+                            TextColor="{StaticResource SeaShellMuted}"
+                            FontSize="12" Padding="12,8" CornerRadius="3" />
+                    <Button Text="Photo" Clicked="OnSendPhotoClicked"
+                            HorizontalOptions="Start"
+                            BackgroundColor="{StaticResource CoalSurface}"
+                            TextColor="{StaticResource SeaShellMuted}"
+                            FontSize="12" Padding="12,8" CornerRadius="3" />
+                    <Button Text="Clear" Clicked="OnClearChatClicked"
+                            HorizontalOptions="Start"
+                            BackgroundColor="{StaticResource CoalSurface}"
+                            TextColor="{StaticResource SeaShellMuted}"
+                            FontSize="12" Padding="12,8" CornerRadius="3" />
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+
             <!-- File transfer status row -->
-            <Grid Grid.Row="5" Padding="10,4,8,4"
+            <Grid x:Name="FileStatusBar" Grid.Row="5" Padding="10,4,8,4"
                   ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="4"
                   BackgroundColor="{StaticResource CoalPanel}">
                 <Label Grid.Column="0" x:Name="FileTransferLabel" Text="File: idle"
@@ -260,7 +298,7 @@
             </Grid>
 
             <!-- Technical logs + Metrics bar -->
-            <Grid Grid.Row="6" RowDefinitions="Auto,Auto,*" BackgroundColor="{StaticResource CoalPanel}">
+            <Grid x:Name="DiagnosticsPanel" Grid.Row="6" RowDefinitions="Auto,Auto,*" BackgroundColor="{StaticResource CoalPanel}">
                 <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" />
                 <!-- Metrics bar -->
                 <Grid Grid.Row="1" Padding="10,5,10,5" ColumnDefinitions="*,*,*,*" ColumnSpacing="6"

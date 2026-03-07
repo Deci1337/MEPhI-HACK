@@ -66,6 +66,7 @@ namespace MassangerMaximka
         private readonly HashSet<string> _unreadPeers = new();
         private int _techLogCount;
         private volatile bool _suppressTechLog;
+        private bool _isNarrowLayout;
 
         public MainPage()
         {
@@ -73,6 +74,7 @@ namespace MassangerMaximka
             PeersList.ItemsSource = _peers;
             ChatList.ItemsSource = _chatItems;
             LoadSavedPeers();
+            SizeChanged += (_, _) => ApplyResponsiveLayout(Width);
         }
 
         protected override void OnAppearing()
@@ -132,6 +134,7 @@ namespace MassangerMaximka
             VoiceStatusLabel.Text = "Voice: idle";
 
             RefreshPeersList();
+            ApplyResponsiveLayout(Width);
         }
 
         protected override void OnDisappearing()
@@ -201,6 +204,8 @@ namespace MassangerMaximka
                 _autoConnectInFlight.Remove(nodeId);
                 var name = ResolveDisplayName(nodeId);
                 AppendChat($"[Connected] {name}", toPeer: nodeId);
+                if (_selectedPeerNodeId == null && ep != null)
+                    PromoteConnectedPeer(ep, nodeId);
                 TechLog(LogCat.Network, $"TCP connected: {name} ({nodeId})" + (ep != null ? $" remote={ep}" : ""));
                 TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
             });
@@ -264,12 +269,8 @@ namespace MassangerMaximka
                 if (text.StartsWith(CallRequestPrefix, StringComparison.Ordinal))
                 {
                     var payload = text[CallRequestPrefix.Length..];
-                    var colonIdx = payload.LastIndexOf(':');
-                    var ipStr = colonIdx > 0 ? payload[..colonIdx] : payload;
-                    var voicePort = colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out var vp) ? vp : 45679;
-                    var callerIp = _peerEndpointMap.TryGetValue(msg.FromNodeId, out var tcpEp)
-                        ? tcpEp.Address
-                        : (IPAddress.TryParse(ipStr, out var parsed) ? parsed : null);
+                    var voicePort = ParseVoicePortPayload(payload);
+                    var callerIp = ResolveConnectedPeerAddress(msg.FromNodeId);
                     _peerVoicePortMap[msg.FromNodeId] = voicePort;
                     if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
                     {
@@ -300,14 +301,9 @@ namespace MassangerMaximka
                     {
                         _isCallingOut = false;
                         if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal))
-                        {
-                            var payload = text[CallAcceptPrefix.Length..];
-                            var colonIdx = payload.LastIndexOf(':');
-                            if (colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out var peerVp))
-                                _callPeerVoicePort = peerVp;
-                        }
-                        if (_peerEndpointMap.TryGetValue(msg.FromNodeId, out var tcpEp))
-                            _callPeerIp = tcpEp.Address;
+                            _callPeerVoicePort = ParseVoicePortPayload(text[CallAcceptPrefix.Length..]);
+
+                        _callPeerIp = ResolveConnectedPeerAddress(msg.FromNodeId) ?? _callPeerIp;
                         _peerVoicePortMap[msg.FromNodeId] = _callPeerVoicePort;
                         if (_callPeerNodeId == null) _callPeerNodeId = msg.FromNodeId;
                         TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId} ip={_callPeerIp} voice_port={_callPeerVoicePort}");
@@ -645,15 +641,6 @@ namespace MassangerMaximka
                 _peers.Add($"#CH {_activeChannelName ?? "channel"} | {_channelMembers.Count} members");
             var seen = new HashSet<string>();
             var seenEndpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (_discovery != null)
-                foreach (var kv in _discovery.Peers)
-                {
-                    if (!seenEndpoints.Add(kv.Value.EndPoint)) continue;
-                    seen.Add(kv.Key);
-                    var isSaved = _savedPeers.Any(p => string.Equals(p.EndPoint, kv.Value.EndPoint, StringComparison.OrdinalIgnoreCase));
-                    var isConnected = _connections?.IsConnected(kv.Key) == true;
-                    _peers.Add(FormatPeerDisplay(kv.Value.DisplayName, kv.Key, kv.Value.EndPoint, isSaved, true, isConnected));
-                }
             if (_connections != null)
                 foreach (var nodeId in _connections.Connections.Keys)
                 {
@@ -663,7 +650,18 @@ namespace MassangerMaximka
                     var connEpStr = connEp != null ? $"{connEp.Address}:{connEp.Port}" : "";
                     if (!string.IsNullOrEmpty(connEpStr) && !seenEndpoints.Add(connEpStr)) continue;
                     var name = ResolveDisplayName(nodeId);
-                    _peers.Add(FormatPeerDisplay(name, nodeId, connEpStr, false, false, true));
+                    var isSaved = !string.IsNullOrWhiteSpace(connEpStr)
+                        && _savedPeers.Any(p => string.Equals(p.EndPoint, connEpStr, StringComparison.OrdinalIgnoreCase));
+                    _peers.Add(FormatPeerDisplay(name, nodeId, connEpStr, isSaved, false, true));
+                }
+            if (_discovery != null)
+                foreach (var kv in _discovery.Peers)
+                {
+                    if (!seenEndpoints.Add(kv.Value.EndPoint)) continue;
+                    seen.Add(kv.Key);
+                    var isSaved = _savedPeers.Any(p => string.Equals(p.EndPoint, kv.Value.EndPoint, StringComparison.OrdinalIgnoreCase));
+                    var isConnected = _connections?.IsConnected(kv.Key) == true;
+                    _peers.Add(FormatPeerDisplay(kv.Value.DisplayName, kv.Key, kv.Value.EndPoint, isSaved, true, isConnected));
                 }
             foreach (var peer in _savedPeers.OrderBy(p => p.DisplayName).ThenBy(p => p.EndPoint))
             {
@@ -688,6 +686,7 @@ namespace MassangerMaximka
             if (!string.IsNullOrWhiteSpace(savedEndPoint))
                 ManualIpEntry.Text = savedEndPoint;
 
+            _selectedPeerNodeId = NormalizeNodeId(_selectedPeerNodeId, savedEndPoint);
             if (_selectedPeerNodeId != null)
                 SwitchChat(_selectedPeerNodeId);
         }
@@ -711,15 +710,16 @@ namespace MassangerMaximka
             if (!ParseEndpoint(endPointText, out var ip, out var port))
                 return;
 
-            if (_connections == null || _discovery == null)
+            if (_connections == null)
                 return;
 
-            var nodeId = ExtractNodeId(displayText) ?? $"manual-{ip}:{port}";
+            var nodeId = NormalizeNodeId(ExtractNodeId(displayText), endPointText) ?? $"endpoint:{ip}:{port}";
             RememberPeer($"Manual {ip}", ip.ToString(), port);
-            _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
             TechLog(LogCat.Network, $"Double-tap connect -> {ip}:{port}");
-            var ok = await _connections.ConnectToPeerAsync(nodeId, new IPEndPoint(ip, port));
-            AppendChat(ok ? $"[Connected] {nodeId}" : $"[Failed] {nodeId}");
+            var endPoint = new IPEndPoint(ip, port);
+            var ok = await _connections.ConnectToPeerAsync(nodeId, endPoint);
+            var connectedNodeId = ok ? PromoteConnectedPeer(endPoint, nodeId) : nodeId;
+            AppendChat(ok ? $"[Connected] {connectedNodeId}" : $"[Failed] {nodeId}");
             RefreshPeersList();
         }
 
@@ -728,27 +728,30 @@ namespace MassangerMaximka
         private async void OnConnectClicked(object? sender, EventArgs e)
         {
             var input = ManualIpEntry.Text?.Trim();
-            if (string.IsNullOrEmpty(input) || _connections == null || _discovery == null) return;
+            if (string.IsNullOrEmpty(input) || _connections == null) return;
             if (!ParseEndpoint(input, out var ip, out var port))
             {
                 AppendChat("[Error] Invalid IP:port");
                 return;
             }
             RememberPeer($"Manual {ip}", ip.ToString(), port);
-            var nodeId = $"manual-{ip}:{port}";
-            _discovery.AddManualPeer(nodeId, $"Manual {ip}", new IPEndPoint(ip, port));
+            var nodeId = $"endpoint:{ip}:{port}";
             TechLog(LogCat.Network, $"Connecting to {ip}:{port}...");
-            var ok = await _connections.ConnectToPeerAsync(nodeId, new IPEndPoint(ip, port));
-            AppendChat(ok ? $"[Connected] {nodeId}" : $"[Failed] {nodeId}");
-            if (ok) TechLog(LogCat.Encryption, $"TCP session established with {nodeId}");
+            var endPoint = new IPEndPoint(ip, port);
+            var ok = await _connections.ConnectToPeerAsync(nodeId, endPoint);
+            var connectedNodeId = ok ? PromoteConnectedPeer(endPoint, nodeId) : nodeId;
+            AppendChat(ok ? $"[Connected] {connectedNodeId}" : $"[Failed] {nodeId}");
+            if (ok) TechLog(LogCat.Encryption, $"TCP session established with {connectedNodeId}");
             RefreshPeersList();
         }
 
         private async void OnSendClicked(object? sender, EventArgs e)
         {
-            var text = MessageEntry.Text?.Trim();
+            var activeEntry = MessageBarNarrow.IsVisible ? MessageEntryNarrow : MessageEntry;
+            var text = activeEntry.Text?.Trim();
             if (string.IsNullOrEmpty(text) || _chat == null) return;
             MessageEntry.Text = "";
+            MessageEntryNarrow.Text = "";
 
             if (_activeChannelId != null && _channelMembers.Count > 0)
             {
@@ -762,8 +765,7 @@ namespace MassangerMaximka
                 return;
             }
 
-            var toNodeId = _selectedPeerNodeId
-                ?? (_peers.Count > 0 ? ExtractNodeId(_peers[0]) : null);
+            var toNodeId = GetSelectedOrFirstPeerNodeId();
             if (string.IsNullOrEmpty(toNodeId))
             {
                 AppendChat("[Error] Select a peer first");
@@ -1070,15 +1072,14 @@ namespace MassangerMaximka
             _callPeerVoicePort = _peerVoicePortMap.TryGetValue(nodeId, out var knownVp) ? knownVp : (_voice?.ListenPort ?? 45679);
             _isCallingOut = true;
 
-            var localIp = GetLocalIpAddress();
             var voicePort = _voice?.ListenPort ?? 45679;
-            await SendCallSignalAsync(nodeId, $"{CallRequestPrefix}{localIp}:{voicePort}");
+            await SendCallSignalAsync(nodeId, $"{CallRequestPrefix}{voicePort}");
 
             CallBtn.Text = "Cancel";
             CallBtn.BackgroundColor = Color.FromArgb("#E65100");
             VoiceStatusLabel.Text = $"Calling {nodeId}...";
             AppendChat($"[Call] Calling {nodeId}...");
-            TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} ip={localIp} voice_port={voicePort}");
+            TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} voice_port={voicePort}");
         }
 
         private async Task StartChannelCallAsync()
@@ -1114,10 +1115,9 @@ namespace MassangerMaximka
             }
 
             var voicePort = _voice.ListenPort;
-            var localIp = GetLocalIpAddress();
             if (_localNodeId != null) _peerVoicePortMap[_localNodeId] = voicePort;
             foreach (var m in _channelMembers.Where(m => m != _localNodeId))
-                _ = SendCallSignalAsync(m, $"{CallRequestPrefix}{localIp}:{voicePort}");
+                _ = SendCallSignalAsync(m, $"{CallRequestPrefix}{voicePort}");
 
             RecordBtn.IsVisible = false;
             StopSendBtn.IsVisible = false;
@@ -1207,19 +1207,16 @@ namespace MassangerMaximka
 
             if (string.IsNullOrEmpty(fromNodeId)) return;
 
-            var callerIp = _peerEndpointMap.TryGetValue(fromNodeId, out var tcpEp)
-                ? tcpEp.Address
-                : _incomingCallerIp;
+            var callerIp = ResolveConnectedPeerAddress(fromNodeId) ?? _incomingCallerIp;
             if (callerIp == null) return;
 
-            var localIp = GetLocalIpAddress();
             var localVoicePort = _voice?.ListenPort ?? 45679;
-            await SendCallSignalAsync(fromNodeId, $"{CallAcceptPrefix}{localIp}:{localVoicePort}");
+            await SendCallSignalAsync(fromNodeId, $"{CallAcceptPrefix}{localVoicePort}");
             _callPeerNodeId = fromNodeId;
             _callPeerIp = callerIp;
             _callPeerVoicePort = callerVoicePort;
             _peerVoicePortMap[fromNodeId] = callerVoicePort;
-            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice={localIp}:{localVoicePort} peer_tcp_ip={callerIp} peer_voice={callerVoicePort}");
+            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice_port={localVoicePort} peer_tcp_ip={callerIp} peer_voice={callerVoicePort}");
             await StartCallAsync(fromNodeId, callerIp, callerVoicePort);
         }
 
@@ -1300,18 +1297,6 @@ namespace MassangerMaximka
             {
                 _ = SendCallSignalAsync(_callPeerNodeId, signal);
             }
-        }
-
-        private static string GetLocalIpAddress()
-        {
-            try
-            {
-                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
-                return host.AddressList
-                    .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                    ?.ToString() ?? "127.0.0.1";
-            }
-            catch { return "127.0.0.1"; }
         }
 
         private static async Task<bool> EnsureMicPermissionAsync()
@@ -1592,8 +1577,13 @@ namespace MassangerMaximka
 
         private IPAddress? ResolvePeerIpAddress(string nodeId)
         {
+            nodeId = NormalizeNodeId(nodeId) ?? nodeId;
             if (_peerEndpointMap.TryGetValue(nodeId, out var cachedEp))
                 return cachedEp.Address;
+
+            var connectedEp = ResolveConnectedPeerEndPoint(nodeId);
+            if (connectedEp != null)
+                return connectedEp.Address;
 
             if (_discovery?.Peers.TryGetValue(nodeId, out var peer) == true &&
                 IPAddress.TryParse(peer.IpAddress, out var discovered))
@@ -1620,9 +1610,151 @@ namespace MassangerMaximka
         private string? GetSelectedOrFirstPeerNodeId()
         {
             if (!string.IsNullOrEmpty(_selectedPeerNodeId))
-                return _selectedPeerNodeId;
+                return NormalizeNodeId(_selectedPeerNodeId, ManualIpEntry.Text?.Trim()) ?? _selectedPeerNodeId;
 
-            return _peers.Count > 0 ? ExtractNodeId(_peers[0]) : null;
+            if (_peers.Count == 0)
+                return null;
+
+            var first = _peers[0];
+            return NormalizeNodeId(ExtractNodeId(first), ExtractEndPoint(first));
+        }
+
+        protected override void OnSizeAllocated(double width, double height)
+        {
+            base.OnSizeAllocated(width, height);
+            ApplyResponsiveLayout(width);
+        }
+
+        private void ApplyResponsiveLayout(double width)
+        {
+            if (width <= 0)
+                return;
+
+            var narrow = width < 700;
+            _isNarrowLayout = narrow;
+            MessageBarWide.IsVisible = !narrow;
+            MessageBarNarrow.IsVisible = narrow;
+            SidebarDivider.IsVisible = !narrow;
+
+            if (narrow)
+            {
+                RootLayout.ColumnDefinitions[0].Width = GridLength.Star;
+                RootLayout.ColumnDefinitions[1].Width = new GridLength(0);
+                Grid.SetRow(SidebarPanel, 0);
+                Grid.SetColumn(SidebarPanel, 0);
+                Grid.SetRowSpan(SidebarPanel, 1);
+                Grid.SetRow(ChatPanel, 1);
+                Grid.SetColumn(ChatPanel, 0);
+                Grid.SetRowSpan(ChatPanel, 1);
+                SidebarPanel.MaximumHeightRequest = 220;
+                PeersList.HeightRequest = 140;
+            }
+            else
+            {
+                RootLayout.ColumnDefinitions[0].Width = new GridLength(DeviceInfo.Idiom == DeviceIdiom.Phone ? 160 : 220);
+                RootLayout.ColumnDefinitions[1].Width = GridLength.Star;
+                Grid.SetRow(SidebarPanel, 0);
+                Grid.SetColumn(SidebarPanel, 0);
+                Grid.SetRowSpan(SidebarPanel, 2);
+                Grid.SetRow(ChatPanel, 0);
+                Grid.SetColumn(ChatPanel, 1);
+                Grid.SetRowSpan(ChatPanel, 2);
+                SidebarPanel.MaximumHeightRequest = double.PositiveInfinity;
+                PeersList.HeightRequest = -1;
+            }
+
+            DiagnosticsPanel.IsVisible = !narrow;
+            ChatPanel.RowDefinitions[6].Height = narrow
+                ? new GridLength(0)
+                : new GridLength(2, GridUnitType.Star);
+        }
+
+        private string? NormalizeNodeId(string? nodeId, string? endPointText = null)
+        {
+            if (!string.IsNullOrWhiteSpace(endPointText) && ParseEndpoint(endPointText, out var ip, out var port))
+            {
+                var connectedNodeId = _connections?.FindPeerNodeId(new IPEndPoint(ip, port));
+                if (!string.IsNullOrWhiteSpace(connectedNodeId))
+                {
+                    if (!string.IsNullOrWhiteSpace(nodeId) && !string.Equals(nodeId, connectedNodeId, StringComparison.Ordinal))
+                        MergePeerIdentity(nodeId, connectedNodeId);
+                    return connectedNodeId;
+                }
+            }
+
+            return nodeId;
+        }
+
+        private string PromoteConnectedPeer(IPEndPoint endPoint, string fallbackNodeId)
+        {
+            var actualNodeId = _connections?.FindPeerNodeId(endPoint) ?? fallbackNodeId;
+            if (!string.Equals(actualNodeId, fallbackNodeId, StringComparison.Ordinal))
+                MergePeerIdentity(fallbackNodeId, actualNodeId);
+
+            _selectedPeerNodeId = actualNodeId;
+            SwitchChat(actualNodeId);
+            return actualNodeId;
+        }
+
+        private void MergePeerIdentity(string sourceNodeId, string targetNodeId)
+        {
+            if (string.IsNullOrWhiteSpace(sourceNodeId) ||
+                string.IsNullOrWhiteSpace(targetNodeId) ||
+                string.Equals(sourceNodeId, targetNodeId, StringComparison.Ordinal))
+                return;
+
+            if (_peerChats.Remove(sourceNodeId, out var sourceChat))
+            {
+                var targetChat = GetOrCreatePeerChat(targetNodeId);
+                foreach (var item in sourceChat)
+                    targetChat.Add(item);
+            }
+
+            if (_unreadPeers.Remove(sourceNodeId))
+                _unreadPeers.Add(targetNodeId);
+
+            if (_peerEndpointMap.Remove(sourceNodeId, out var endpoint))
+                _peerEndpointMap[targetNodeId] = endpoint;
+
+            if (_peerVoicePortMap.Remove(sourceNodeId, out var voicePort))
+                _peerVoicePortMap[targetNodeId] = voicePort;
+
+            if (_selectedPeerNodeId == sourceNodeId)
+                _selectedPeerNodeId = targetNodeId;
+
+            if (_activeChatPeer == sourceNodeId)
+            {
+                _activeChatPeer = null;
+                SwitchChat(targetNodeId);
+            }
+        }
+
+        private IPEndPoint? ResolveConnectedPeerEndPoint(string nodeId)
+        {
+            if (string.IsNullOrWhiteSpace(nodeId))
+                return null;
+
+            if (_peerEndpointMap.TryGetValue(nodeId, out var cached))
+                return cached;
+
+            var endpoint = _connections?.GetPeerEndPoint(nodeId);
+            if (endpoint != null)
+                _peerEndpointMap[nodeId] = endpoint;
+            return endpoint;
+        }
+
+        private IPAddress? ResolveConnectedPeerAddress(string nodeId) =>
+            ResolveConnectedPeerEndPoint(nodeId)?.Address;
+
+        private static int ParseVoicePortPayload(string payload)
+        {
+            if (int.TryParse(payload, out var port) && port > 0)
+                return port;
+
+            var colonIdx = payload.LastIndexOf(':');
+            return colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out port) && port > 0
+                ? port
+                : 45679;
         }
 
         private async Task TryAutoConnectPeerAsync(PeerInfo peer)

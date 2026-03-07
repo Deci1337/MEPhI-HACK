@@ -48,16 +48,11 @@ public sealed class TcpChatTransport
 
         try
         {
-            if (_connectionService.IsConnected(toNodeId))
-            {
-                await _connectionService.SendAsync(toNodeId, envelope, ct);
-                msg.Status = DeliveryStatus.Sent;
-            }
-            else
-            {
-                await _connectionService.BroadcastAsync(envelope, ct);
-                msg.Status = DeliveryStatus.Sent;
-            }
+            if (!_connectionService.IsConnected(toNodeId))
+                throw new InvalidOperationException($"Peer {toNodeId} is not connected.");
+
+            await _connectionService.SendAsync(toNodeId, envelope, ct);
+            msg.Status = DeliveryStatus.Sent;
             DeliveryStatusChanged?.Invoke(msg.MessageId, msg.Status);
         }
         catch (Exception ex)
@@ -120,8 +115,7 @@ public sealed class TcpChatTransport
             if (msg == null) return;
 
             var isForMe = msg.ToNodeId == _nodeId
-                       || envelope.DestinationNodeId == _nodeId
-                       || msg.FromNodeId == fromPeerNodeId;
+                       || envelope.DestinationNodeId == _nodeId;
 
             if (isForMe)
             {
@@ -216,10 +210,10 @@ public sealed class TcpChatTransport
             Payload = payload
         };
 
-        if (_connectionService.IsConnected(toNodeId))
-            await _connectionService.SendAsync(toNodeId, envelope, ct);
-        else
-            await _connectionService.BroadcastAsync(envelope, ct);
+        if (!_connectionService.IsConnected(toNodeId))
+            throw new InvalidOperationException($"Peer {toNodeId} is not connected.");
+
+        await _connectionService.SendAsync(toNodeId, envelope, ct);
     }
 
 }

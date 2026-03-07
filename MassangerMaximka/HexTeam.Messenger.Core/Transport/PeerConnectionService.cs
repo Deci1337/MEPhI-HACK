@@ -44,22 +44,30 @@ public sealed class PeerConnectionService : IDisposable
     public async Task<bool> ConnectToPeerAsync(string peerNodeId, IPEndPoint endPoint, CancellationToken ct = default)
     {
         if (_connections.ContainsKey(peerNodeId)) return true;
+        var existingNodeId = FindPeerNodeId(endPoint);
+        if (!string.IsNullOrEmpty(existingNodeId))
+            return true;
+
         try
         {
             var client = new TcpClient();
             await client.ConnectAsync(endPoint.Address, endPoint.Port, ct);
             var conn = new PeerConnection(peerNodeId, client);
-            _connections[peerNodeId] = conn;
+            RegisterConnection(peerNodeId, conn);
 
-            var hello = new TransportEnvelope
+            await SendHelloAsync(conn.Stream, peerNodeId, ct);
+
+            var peerHello = await EnvelopeSerializer.ReadFromStreamAsync(conn.Stream, ct);
+            if (peerHello?.Type != TransportPacketType.Hello || string.IsNullOrWhiteSpace(peerHello.SourceNodeId))
+                throw new InvalidOperationException("Peer did not complete hello handshake.");
+
+            var actualPeerNodeId = peerHello.SourceNodeId;
+            if (!string.Equals(actualPeerNodeId, peerNodeId, StringComparison.Ordinal))
             {
-                PacketId = TransportEnvelope.NewPacketId(),
-                Type = TransportPacketType.Hello,
-                SourceNodeId = _nodeId,
-                DestinationNodeId = peerNodeId,
-                Payload = System.Text.Encoding.UTF8.GetBytes(_nodeId)
-            };
-            await EnvelopeSerializer.WriteToStreamAsync(conn.Stream, hello, ct);
+                _connections.TryRemove(peerNodeId, out _);
+                conn.UpdatePeerNodeId(actualPeerNodeId);
+                RegisterConnection(actualPeerNodeId, conn);
+            }
 
             // ECDH key exchange — both sides derive the same AES-256 session key
             await SendKeyExchangeAsync(conn, ct);
@@ -69,9 +77,9 @@ public sealed class PeerConnectionService : IDisposable
 
             _ = ReceiveLoopAsync(conn, _cts?.Token ?? CancellationToken.None);
 
-            PeerConnected?.Invoke(peerNodeId);
+            PeerConnected?.Invoke(conn.PeerNodeId);
             _logger.LogInformation("Connected to peer {NodeId} at {EP} (encrypted={Enc})",
-                peerNodeId, endPoint, conn.Encryptor != null);
+                conn.PeerNodeId, endPoint, conn.Encryptor != null);
             return true;
         }
         catch (Exception ex)
@@ -155,6 +163,20 @@ public sealed class PeerConnectionService : IDisposable
         return conn.Client.Client.RemoteEndPoint as IPEndPoint;
     }
 
+    public string? FindPeerNodeId(IPEndPoint endPoint)
+    {
+        foreach (var kvp in _connections)
+        {
+            if (kvp.Value.Client.Client.RemoteEndPoint is not IPEndPoint remote)
+                continue;
+
+            if (remote.Address.Equals(endPoint.Address) && remote.Port == endPoint.Port)
+                return kvp.Key;
+        }
+
+        return null;
+    }
+
     private async Task AcceptClientsAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -185,7 +207,9 @@ public sealed class PeerConnectionService : IDisposable
 
             var peerNodeId = hello.SourceNodeId;
             var conn = new PeerConnection(peerNodeId, client);
-            _connections[peerNodeId] = conn;
+            RegisterConnection(peerNodeId, conn);
+
+            await SendHelloAsync(conn.Stream, peerNodeId, ct);
 
             // ECDH key exchange — receive peer key first, then send ours
             var peerKey = await ReceiveKeyExchangeAsync(conn, ct);
@@ -217,6 +241,20 @@ public sealed class PeerConnectionService : IDisposable
             Payload = _keyExchange.PublicKey
         };
         await EnvelopeSerializer.WriteToStreamAsync(conn.Stream, packet, ct);
+    }
+
+    private Task SendHelloAsync(NetworkStream stream, string peerNodeId, CancellationToken ct)
+    {
+        var hello = new TransportEnvelope
+        {
+            PacketId = TransportEnvelope.NewPacketId(),
+            Type = TransportPacketType.Hello,
+            SourceNodeId = _nodeId,
+            DestinationNodeId = peerNodeId,
+            Payload = System.Text.Encoding.UTF8.GetBytes(_nodeId)
+        };
+
+        return EnvelopeSerializer.WriteToStreamAsync(stream, hello, ct);
     }
 
     private async Task<byte[]?> ReceiveKeyExchangeAsync(PeerConnection conn, CancellationToken ct)
@@ -268,6 +306,14 @@ public sealed class PeerConnectionService : IDisposable
         }
     }
 
+    private void RegisterConnection(string peerNodeId, PeerConnection conn)
+    {
+        if (_connections.TryGetValue(peerNodeId, out var existing) && !ReferenceEquals(existing, conn))
+            existing.Dispose();
+
+        _connections[peerNodeId] = conn;
+    }
+
     public void Dispose()
     {
         _cts?.Cancel();
@@ -280,7 +326,7 @@ public sealed class PeerConnectionService : IDisposable
 
 public sealed class PeerConnection : IDisposable
 {
-    public string PeerNodeId { get; }
+    public string PeerNodeId { get; private set; }
     public TcpClient Client { get; }
     public NetworkStream Stream { get; }
     public SemaphoreSlim WriteLock { get; } = new(1, 1);
@@ -295,6 +341,8 @@ public sealed class PeerConnection : IDisposable
         Client = client;
         Stream = client.GetStream();
     }
+
+    public void UpdatePeerNodeId(string peerNodeId) => PeerNodeId = peerNodeId;
 
     public void Dispose()
     {

@@ -31,6 +31,7 @@ public sealed class ChannelService
         {
             ChannelId = Guid.NewGuid().ToString("N")[..8],
             ChannelName = string.IsNullOrWhiteSpace(name) ? "Channel" : name,
+            FromNodeId = _localNodeId,
             MemberNodeIds = [_localNodeId]
         };
 
@@ -43,6 +44,7 @@ public sealed class ChannelService
     public async Task SendInvite(string toNodeId, CancellationToken ct = default)
     {
         var channel = GetActiveChannelOrThrow();
+        channel.FromNodeId = _localNodeId;
         await _chatTransport.SendPacketAsync(
             toNodeId,
             TransportPacketType.ChannelInvite,
@@ -59,17 +61,22 @@ public sealed class ChannelService
 
     public async Task JoinChannel(string channelId, string fromNodeId, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(fromNodeId))
+            throw new InvalidOperationException("Channel join requires inviter node id.");
+
         if (!_channels.TryGetValue(channelId, out var channel))
         {
             channel = new ChannelPacket
             {
                 ChannelId = channelId,
                 ChannelName = $"Channel-{channelId}",
+                FromNodeId = _localNodeId,
                 MemberNodeIds = [_localNodeId]
             };
             _channels[channelId] = channel;
         }
 
+        channel.FromNodeId = _localNodeId;
         if (!channel.MemberNodeIds.Contains(_localNodeId))
             channel.MemberNodeIds.Add(_localNodeId);
         if (!channel.MemberNodeIds.Contains(fromNodeId))
@@ -83,6 +90,7 @@ public sealed class ChannelService
     public async Task BroadcastMembers(CancellationToken ct = default)
     {
         var channel = GetActiveChannelOrThrow();
+        channel.FromNodeId = _localNodeId;
         var payload = JsonSerializer.SerializeToUtf8Bytes(channel);
 
         foreach (var nodeId in channel.MemberNodeIds.Where(id => id != _localNodeId))
@@ -122,6 +130,7 @@ public sealed class ChannelService
         {
             ChannelId = channel.ChannelId,
             ChannelName = isTalking ? _localNodeId : string.Empty,
+            FromNodeId = _localNodeId,
             MemberNodeIds = channel.MemberNodeIds.ToList()
         };
         var payload = JsonSerializer.SerializeToUtf8Bytes(pttPacket);
@@ -190,6 +199,7 @@ public sealed class ChannelService
         {
             ChannelId = packet.ChannelId,
             ChannelName = packet.ChannelName,
+            FromNodeId = packet.FromNodeId,
             MemberNodeIds = packet.MemberNodeIds.ToList()
         };
 }

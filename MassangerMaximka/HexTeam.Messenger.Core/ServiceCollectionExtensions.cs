@@ -22,7 +22,9 @@ public static class ServiceCollectionExtensions
         config ??= new NodeConfiguration();
         services.AddSingleton(config);
 
-        var nodeGuid = Guid.TryParse(config.NodeId, out var g) ? g : Guid.NewGuid();
+        if (!Guid.TryParse(config.NodeId, out var nodeGuid))
+            throw new InvalidOperationException($"NodeId must be a GUID, got '{config.NodeId}'.");
+
         var identity = new NodeIdentity(nodeGuid, config.DisplayName);
         services.AddSingleton(identity);
 
