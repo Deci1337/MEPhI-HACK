@@ -2,94 +2,193 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="MassangerMaximka.MainPage"
-             Title="Hex P2P Test">
+             Title="PHOTON"
+             BackgroundColor="{StaticResource Coal}">
 
-    <Grid RowDefinitions="*,Auto,*" Padding="15" RowSpacing="10">
+    <!-- Two-column on Desktop, stacked on Phone -->
+    <Grid ColumnSpacing="0" RowSpacing="0">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="{OnIdiom Phone=100, Default=220}" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <!-- Top: Chat UI -->
-        <ScrollView Grid.Row="0">
-            <VerticalStackLayout Spacing="10">
-                <Label x:Name="StatusLabel" Text="Starting..." FontAttributes="Bold" FontSize="16" />
-                <Label x:Name="PortHintLabel" Text="" TextColor="Gray" FontSize="11" />
-                <Label x:Name="PeersLabel" Text="Peers: 0" FontSize="13" />
-                <CollectionView x:Name="PeersList" HeightRequest="80" SelectionMode="Single"
-                                SelectionChanged="OnPeerSelected">
-                    <CollectionView.ItemTemplate>
-                        <DataTemplate x:DataType="x:String">
-                            <Label Text="{Binding}" Padding="4" FontSize="12">
-                                <Label.GestureRecognizers>
-                                    <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
-                                </Label.GestureRecognizers>
-                            </Label>
-                        </DataTemplate>
-                    </CollectionView.ItemTemplate>
-                </CollectionView>
+        <!-- ====== LEFT: Peers sidebar ====== -->
+        <Grid Grid.Column="0" BackgroundColor="{StaticResource CoalPanel}"
+              RowDefinitions="Auto,Auto,*,Auto" RowSpacing="0">
 
-                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
-                    <Entry x:Name="ManualIpEntry" Placeholder="IP:port (e.g. 127.0.0.1:45680)" Grid.Column="0" FontSize="13" />
-                    <Button Text="Connect" Grid.Column="1" Clicked="OnConnectClicked" FontSize="12" Padding="8,4" />
-                    <Button Text="Forget Saved" Grid.Column="2" Clicked="OnForgetSavedPeersClicked" FontSize="11" Padding="8,4" BackgroundColor="#6D4C41" />
+            <!-- Sidebar header -->
+            <StackLayout Grid.Row="0" Padding="10,14,10,10" Spacing="2">
+                <Label Text="PHOTON" FontSize="{OnIdiom Phone=13, Default=16}"
+                       FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                <Label x:Name="StatusLabel" Text="Starting..." FontSize="9"
+                       TextColor="{StaticResource SeaShellMuted}" />
+                <Label x:Name="PortHintLabel" Text="" FontSize="8"
+                       TextColor="{StaticResource SeaShellMuted}" />
+            </StackLayout>
+            <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
+
+            <!-- Peers count -->
+            <Label Grid.Row="1" x:Name="PeersLabel" Text="Peers: 0"
+                   FontSize="9" TextColor="{StaticResource SeaShellMuted}"
+                   Padding="10,6,10,2" />
+
+            <!-- Peers list -->
+            <CollectionView Grid.Row="2" x:Name="PeersList" SelectionMode="Single"
+                            SelectionChanged="OnPeerSelected">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <Grid Padding="{OnIdiom Phone='6,8', Default='10,10'}" BackgroundColor="Transparent">
+                            <Grid.GestureRecognizers>
+                                <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
+                            </Grid.GestureRecognizers>
+                            <Label Text="{Binding}" FontSize="{OnIdiom Phone=10, Default=12}"
+                                   TextColor="{StaticResource SeaShell}"
+                                   LineBreakMode="TailTruncation" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <!-- Connect section -->
+            <StackLayout Grid.Row="3" Padding="6,6,6,10" Spacing="5">
+                <BoxView HeightRequest="1" Color="{StaticResource CoalBorder}" />
+                <Entry x:Name="ManualIpEntry" Placeholder="IP:port"
+                       FontSize="{OnIdiom Phone=10, Default=11}"
+                       BackgroundColor="{StaticResource CoalInput}"
+                       TextColor="{StaticResource SeaShell}"
+                       PlaceholderColor="{StaticResource SeaShellMuted}" />
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="4">
+                    <Button Grid.Column="0" Text="Connect" Clicked="OnConnectClicked"
+                            BackgroundColor="{StaticResource CoalSurface}"
+                            TextColor="{StaticResource SeaShell}"
+                            FontSize="{OnIdiom Phone=9, Default=10}" Padding="0,6" CornerRadius="3" />
+                    <Button Grid.Column="1" Text="Forget" Clicked="OnForgetSavedPeersClicked"
+                            BackgroundColor="{StaticResource DangerRed}"
+                            TextColor="{StaticResource SeaShell}"
+                            FontSize="{OnIdiom Phone=9, Default=10}" Padding="0,6" CornerRadius="3" />
                 </Grid>
+            </StackLayout>
+        </Grid>
 
-                <Label x:Name="SelectedPeerLabel" Text="Selected: (none)" TextColor="Gray" FontSize="12" />
+        <!-- Vertical divider -->
+        <BoxView Grid.Column="0" WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="End" />
 
-                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
-                    <Entry x:Name="MessageEntry" Placeholder="Type message..." Grid.Column="0" FontSize="13" />
-                    <Button Text="Send" Grid.Column="1" Clicked="OnSendClicked" FontSize="12" Padding="8,4" />
-                    <Button Text="Clear" Grid.Column="2" Clicked="OnClearChatClicked" FontSize="11" Padding="6,4" BackgroundColor="#555" />
-                </Grid>
+        <!-- ====== RIGHT: Chat panel ====== -->
+        <Grid Grid.Column="1" BackgroundColor="{StaticResource Coal}"
+              RowDefinitions="Auto,Auto,3*,Auto,Auto,2*" RowSpacing="0">
 
-                <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="5">
-                    <Button Text="Pick File" Grid.Column="0" Clicked="OnSendTestFileClicked" FontSize="11" Padding="6,4" />
-                    <Button Text="Resume" Grid.Column="1" Clicked="OnResumeFileClicked" FontSize="11" Padding="6,4" />
-                    <Label x:Name="FileTransferLabel" Grid.Column="2" Text="File: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
-                </Grid>
-
-                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="5">
-                    <Button x:Name="RecordBtn" Text="Record" Grid.Column="0" Clicked="OnRecordVoiceClicked" FontSize="11" Padding="6,4" BackgroundColor="#C62828" />
-                    <Button Text="Stop &amp; Send" Grid.Column="1" Clicked="OnStopSendVoiceClicked" FontSize="11" Padding="6,4" />
-                    <Button Text="Play" Grid.Column="2" Clicked="OnPlayVoiceClicked" FontSize="11" Padding="6,4" BackgroundColor="#1565C0" />
-                    <Button x:Name="CallBtn" Text="Call" Grid.Column="3" Clicked="OnCallButtonClicked" FontSize="11" Padding="6,4" BackgroundColor="#2E7D32" />
-                    <Label x:Name="VoiceStatusLabel" Grid.Column="4" Text="Voice: idle" FontSize="11" TextColor="Gray" VerticalOptions="Center" />
-                </Grid>
-
-                <!-- Incoming Call Banner -->
-                <Frame x:Name="IncomingCallBanner" IsVisible="False" BackgroundColor="#1B5E20"
-                       BorderColor="#4CAF50" Padding="10" CornerRadius="8">
-                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
-                        <Label x:Name="IncomingCallLabel" Text="Incoming call" TextColor="White"
-                               FontSize="13" FontAttributes="Bold" VerticalOptions="Center" Grid.Column="0" />
-                        <Button Text="Accept" Grid.Column="1" Clicked="OnAcceptCallClicked"
-                                FontSize="11" Padding="8,4" BackgroundColor="#2E7D32" TextColor="White" />
-                        <Button Text="Decline" Grid.Column="2" Clicked="OnDeclineCallClicked"
-                                FontSize="11" Padding="8,4" BackgroundColor="#B71C1C" TextColor="White" />
-                    </Grid>
-                </Frame>
-
-                <Frame BorderColor="LightGray" Padding="8" HeightRequest="140">
-                    <ScrollView x:Name="ChatScrollView">
-                        <Label x:Name="ChatLogLabel" Text="" LineBreakMode="WordWrap" FontSize="12" />
-                    </ScrollView>
-                </Frame>
-            </VerticalStackLayout>
-        </ScrollView>
-
-        <!-- Divider -->
-        <BoxView Grid.Row="1" HeightRequest="2" Color="DarkGray" />
-
-        <!-- Bottom: Technical Logs -->
-        <VerticalStackLayout Grid.Row="2" Spacing="5">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                <Label Text="Technical Logs" FontAttributes="Bold" FontSize="14" Grid.Column="0" />
-                <Label x:Name="LogCountLabel" Text="" TextColor="Gray" FontSize="11" Grid.Column="1" VerticalOptions="Center" Margin="10,0,0,0" />
-                <Button Text="Copy" Grid.Column="2" Clicked="OnCopyLogsClicked" FontSize="11" Padding="6,2" BackgroundColor="#37474F" />
-                <Button x:Name="ClearLogsBtn" Text="Clear" Grid.Column="3" Clicked="OnClearLogsClicked" FontSize="11" Padding="6,2" />
+            <!-- Chat header: selected peer + call controls -->
+            <Grid Grid.Row="0" Padding="12,9,8,9"
+                  ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="6"
+                  BackgroundColor="{StaticResource CoalPanel}">
+                <StackLayout Grid.Column="0" Spacing="1" VerticalOptions="Center">
+                    <Label x:Name="SelectedPeerLabel" Text="Select a peer"
+                           FontSize="{OnIdiom Phone=12, Default=14}" FontAttributes="Bold"
+                           TextColor="{StaticResource SeaShell}" />
+                    <Label x:Name="VoiceStatusLabel" Text="Voice: idle"
+                           FontSize="9" TextColor="{StaticResource SeaShellMuted}" />
+                </StackLayout>
+                <Button Grid.Column="1" x:Name="RecordBtn" Text="REC"
+                        Clicked="OnRecordVoiceClicked"
+                        BackgroundColor="{StaticResource DangerRed}"
+                        TextColor="{StaticResource SeaShell}"
+                        FontSize="10" Padding="8,4" CornerRadius="3" />
+                <Button Grid.Column="2" Text="STOP"
+                        Clicked="OnStopSendVoiceClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShell}"
+                        FontSize="10" Padding="8,4" CornerRadius="3" />
+                <Button Grid.Column="3" Text="PLAY"
+                        Clicked="OnPlayVoiceClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShell}"
+                        FontSize="10" Padding="8,4" CornerRadius="3" />
+                <Button Grid.Column="4" x:Name="CallBtn" Text="Call"
+                        Clicked="OnCallButtonClicked"
+                        BackgroundColor="{StaticResource SuccessGreen}"
+                        TextColor="{StaticResource SeaShell}"
+                        FontSize="10" Padding="10,4" CornerRadius="3" />
             </Grid>
-            <Frame BackgroundColor="#1a1a2e" Padding="8" CornerRadius="6">
-                <ScrollView x:Name="TechLogScrollView">
+            <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
+
+            <!-- Incoming call banner -->
+            <Frame Grid.Row="1" x:Name="IncomingCallBanner" IsVisible="False"
+                   BackgroundColor="#182A1A" BorderColor="{StaticResource SuccessGreen}"
+                   Padding="10,6" CornerRadius="0" Margin="0">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                    <Label Grid.Column="0" x:Name="IncomingCallLabel" Text="Incoming call..."
+                           TextColor="{StaticResource SeaShell}" FontSize="12"
+                           FontAttributes="Bold" VerticalOptions="Center" />
+                    <Button Grid.Column="1" Text="Accept" Clicked="OnAcceptCallClicked"
+                            BackgroundColor="{StaticResource SuccessGreen}"
+                            TextColor="{StaticResource SeaShell}" FontSize="10" Padding="12,4" CornerRadius="3" />
+                    <Button Grid.Column="2" Text="Decline" Clicked="OnDeclineCallClicked"
+                            BackgroundColor="{StaticResource DangerRed}"
+                            TextColor="{StaticResource SeaShell}" FontSize="10" Padding="12,4" CornerRadius="3" />
+                </Grid>
+            </Frame>
+
+            <!-- Chat messages -->
+            <ScrollView Grid.Row="2" x:Name="ChatScrollView" Padding="14,10">
+                <Label x:Name="ChatLogLabel" Text="" LineBreakMode="WordWrap"
+                       FontSize="{OnIdiom Phone=12, Default=13}"
+                       TextColor="{StaticResource SeaShell}" />
+            </ScrollView>
+
+            <!-- Message input bar -->
+            <Grid Grid.Row="3" Padding="8,6" ColumnDefinitions="Auto,*,Auto,Auto"
+                  ColumnSpacing="6" BackgroundColor="{StaticResource CoalPanel}">
+                <BoxView Grid.ColumnSpan="4" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
+                <Button Grid.Column="0" Text="File" Clicked="OnSendTestFileClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        FontSize="10" Padding="10,6" CornerRadius="3" />
+                <Entry Grid.Column="1" x:Name="MessageEntry" Placeholder="Message..."
+                       BackgroundColor="{StaticResource CoalInput}"
+                       TextColor="{StaticResource SeaShell}"
+                       PlaceholderColor="{StaticResource SeaShellMuted}"
+                       FontSize="{OnIdiom Phone=12, Default=13}" />
+                <Button Grid.Column="2" Text="X" Clicked="OnClearChatClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        FontSize="10" Padding="8,6" CornerRadius="3" />
+                <Button Grid.Column="3" Text="Send" Clicked="OnSendClicked"
+                        BackgroundColor="{StaticResource AccentBlue}"
+                        TextColor="{StaticResource SeaShell}"
+                        FontSize="{OnIdiom Phone=11, Default=12}"
+                        Padding="14,6" CornerRadius="3" />
+            </Grid>
+
+            <!-- File transfer status row -->
+            <Grid Grid.Row="4" Padding="10,4,8,4"
+                  ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="4"
+                  BackgroundColor="{StaticResource CoalPanel}">
+                <Label Grid.Column="0" x:Name="FileTransferLabel" Text="File: idle"
+                       FontSize="9" TextColor="{StaticResource SeaShellMuted}" VerticalOptions="Center" />
+                <Button Grid.Column="1" Text="Resume" Clicked="OnResumeFileClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        FontSize="9" Padding="6,2" CornerRadius="3" />
+                <Label Grid.Column="2" x:Name="LogCountLabel" Text=""
+                       FontSize="9" TextColor="{StaticResource SeaShellMuted}" VerticalOptions="Center" />
+                <Button Grid.Column="3" Text="Copy" Clicked="OnCopyLogsClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        FontSize="9" Padding="6,2" CornerRadius="3" />
+                <Button Grid.Column="4" x:Name="ClearLogsBtn" Text="Clear" Clicked="OnClearLogsClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        FontSize="9" Padding="6,2" CornerRadius="3" />
+            </Grid>
+
+            <!-- Technical logs -->
+            <Grid Grid.Row="5" RowDefinitions="Auto,*" BackgroundColor="{StaticResource CoalPanel}">
+                <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" />
+                <ScrollView Grid.Row="1" x:Name="TechLogScrollView" Padding="10,6">
                     <VerticalStackLayout x:Name="TechLogStack" Spacing="1" />
                 </ScrollView>
-            </Frame>
-        </VerticalStackLayout>
+            </Grid>
+        </Grid>
     </Grid>
 </ContentPage>
