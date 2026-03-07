@@ -35,7 +35,7 @@ public sealed class UdpVoiceTransport : IDisposable
     private readonly List<IPEndPoint> _extraEndPoints = [];
     public void SetExtraEndPoints(IEnumerable<IPEndPoint> endpoints)
     {
-        lock (_extraEndPoints) { _extraEndPoints.Clear(); _extraEndPoints.AddRange(endpoints); }
+        lock (_extraEndPoints) { _extraEndPoints.Clear(); _extraEndPoints.AddRange(endpoints.Select(NormalizeToIPv4)); }
     }
     public void ClearExtraEndPoints() { lock (_extraEndPoints) _extraEndPoints.Clear(); }
     public int ExtraEndPointCount { get { lock (_extraEndPoints) return _extraEndPoints.Count; } }
@@ -66,7 +66,7 @@ public sealed class UdpVoiceTransport : IDisposable
     {
         if (IsActive) Stop();
 
-        _remoteEndPoint = remoteEndPoint;
+        _remoteEndPoint = NormalizeToIPv4(remoteEndPoint);
         _observedPeerEndPoint = null;
         _cts = new CancellationTokenSource();
         _sequenceNumber = 0;
@@ -170,8 +170,7 @@ public sealed class UdpVoiceTransport : IDisposable
                 var result = await _udpClient.ReceiveAsync(ct);
                 consecutiveErrors = 0;
 
-                // Always track the last peer we received from - this is the real reachable address.
-                _observedPeerEndPoint = result.RemoteEndPoint;
+                _observedPeerEndPoint = NormalizeToIPv4(result.RemoteEndPoint);
 
                 var frame = DeserializeFrame(result.Buffer);
                 if (frame == null) continue;
@@ -306,6 +305,17 @@ public sealed class UdpVoiceTransport : IDisposable
 
     private static bool EndPointEquals(IPEndPoint? a, IPEndPoint? b) =>
         a != null && b != null && a.Address.Equals(b.Address) && a.Port == b.Port;
+
+    /// <summary>
+    /// Convert ::ffff:x.x.x.x (IPv6-mapped IPv4) to plain IPv4.
+    /// An IPv4-only UdpClient silently drops sends to IPv6-mapped addresses.
+    /// </summary>
+    private static IPEndPoint NormalizeToIPv4(IPEndPoint ep)
+    {
+        if (ep.Address.IsIPv4MappedToIPv6)
+            return new IPEndPoint(ep.Address.MapToIPv4(), ep.Port);
+        return ep;
+    }
 
     private static UdpClient BindUdpClient(int preferredPort)
     {
