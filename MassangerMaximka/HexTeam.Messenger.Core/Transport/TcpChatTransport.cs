@@ -91,9 +91,6 @@ public sealed class TcpChatTransport
     {
         switch (envelope.Type)
         {
-            case TransportPacketType.Chat:
-                HandleChatPacket(fromPeerNodeId, envelope);
-                break;
             case TransportPacketType.Ack:
                 HandleAck(envelope);
                 break;

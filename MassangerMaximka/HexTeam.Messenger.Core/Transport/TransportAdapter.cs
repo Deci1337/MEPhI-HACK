@@ -1,6 +1,7 @@
 using HexTeam.Messenger.Core.Abstractions;
 using HexTeam.Messenger.Core.Protocol;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace HexTeam.Messenger.Core.Transport;
 
@@ -49,21 +50,56 @@ public sealed class TransportAdapter : ITransport, IDisposable
 
     private Task OnTransportEnvelopeReceived(string fromPeerNodeId, TransportEnvelope transportEnvelope)
     {
-        if (transportEnvelope.Type != TransportPacketType.Relay)
-            return Task.CompletedTask;
-
-        try
+        if (transportEnvelope.Type == TransportPacketType.Relay)
         {
-            var envelope = JsonSerializer.Deserialize<Envelope>(transportEnvelope.Payload);
-            if (envelope != null && Guid.TryParse(fromPeerNodeId, out var fromGuid))
-                PacketReceived?.Invoke(envelope, fromGuid);
+            try
+            {
+                var envelope = JsonSerializer.Deserialize<Envelope>(transportEnvelope.Payload);
+                if (envelope != null && Guid.TryParse(fromPeerNodeId, out var fromGuid))
+                    PacketReceived?.Invoke(envelope, fromGuid);
+            }
+            catch { }
         }
-        catch
+        else if (transportEnvelope.Type == TransportPacketType.Chat)
         {
-            // malformed payload — drop silently
+            TryEmitChatAsEnvelope(fromPeerNodeId, transportEnvelope);
         }
 
         return Task.CompletedTask;
+    }
+
+    private void TryEmitChatAsEnvelope(string fromPeerNodeId, TransportEnvelope transportEnvelope)
+    {
+        try
+        {
+            var msg = JsonSerializer.Deserialize<TransportChatMessage>(transportEnvelope.Payload);
+            if (msg == null || !Guid.TryParse(fromPeerNodeId, out var fromGuid)) return;
+
+            var chatPacket = new ChatPacket
+            {
+                MessageId = Guid.TryParse(msg.MessageId, out var mid) ? mid : Guid.NewGuid(),
+                Text = msg.Text ?? string.Empty,
+                SentAtUtc = msg.TimestampUtc > 0
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(msg.TimestampUtc)
+                    : DateTimeOffset.UtcNow
+            };
+            var payload = JsonSerializer.SerializeToUtf8Bytes(chatPacket);
+            var envelope = new Envelope
+            {
+                PacketId = Guid.TryParse(transportEnvelope.PacketId, out var pid) ? pid : Guid.NewGuid(),
+                MessageId = chatPacket.MessageId,
+                SessionId = Guid.Empty,
+                OriginNodeId = Guid.TryParse(transportEnvelope.SourceNodeId, out var oid) ? oid : fromGuid,
+                CurrentSenderNodeId = fromGuid,
+                TargetNodeId = Guid.TryParse(transportEnvelope.DestinationNodeId, out var tid) ? tid : Guid.Empty,
+                HopCount = transportEnvelope.HopCount,
+                MaxHops = transportEnvelope.MaxHops > 0 ? transportEnvelope.MaxHops : 5,
+                PacketType = PacketType.ChatEnvelope,
+                Payload = payload
+            };
+            PacketReceived?.Invoke(envelope, fromGuid);
+        }
+        catch { }
     }
 
     public void Dispose() =>
