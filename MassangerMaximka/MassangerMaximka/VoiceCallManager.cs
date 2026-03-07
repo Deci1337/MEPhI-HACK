@@ -5,24 +5,25 @@ using Plugin.Maui.Audio;
 namespace MassangerMaximka;
 
 /// <summary>
-/// Manages real-time voice call lifecycle: overlapped recording in chunks,
-/// WAV header stripping for transmission, and batched sequential playback.
+/// Walkie-talkie voice call: hold Talk to record, release to send.
+/// Receives and plays back incoming frames continuously.
 /// </summary>
 public sealed class VoiceCallManager : IDisposable
 {
-    private const int ChunkMs = 200;
-    private const int PlaybackBatchMs = 600;
-    private const int PlaybackBatchMaxFrames = 5;
+    private const int PcmChunkSize = 6400; // 200ms at 16kHz mono 16-bit
 
     private readonly UdpVoiceTransport _transport;
     private readonly IAudioManager _audioManager;
-    private readonly string _tempDir;
 
     private CancellationTokenSource? _cts;
     private readonly ConcurrentQueue<byte[]> _playbackQueue = new();
     private volatile bool _active;
+    private volatile bool _talking;
+    private IAudioRecorder? _talkRecorder;
+    private int _receivedCount;
 
     public bool IsActive => _active;
+    public bool IsTalking => _talking;
 
     public event Action<string>? Log;
 
@@ -30,8 +31,6 @@ public sealed class VoiceCallManager : IDisposable
     {
         _transport = transport;
         _audioManager = audioManager;
-        _tempDir = Path.Combine(FileSystem.Current.AppDataDirectory, "CallChunks");
-        Directory.CreateDirectory(_tempDir);
     }
 
     public void Start(System.Net.IPEndPoint remoteEndPoint)
@@ -43,15 +42,78 @@ public sealed class VoiceCallManager : IDisposable
         _transport.Start(remoteEndPoint);
         _transport.FrameReceived += OnFrameReceived;
 
-        var ct = _cts.Token;
-        _ = Task.Run(() => RecordLoopAsync(ct), ct);
-        _ = Task.Run(() => PlaybackLoopAsync(ct), ct);
+        _ = Task.Run(() => PlaybackLoopAsync(_cts.Token), _cts.Token);
+        Log?.Invoke("Walkie-talkie ready. Hold Talk to speak.");
+    }
+
+    public async Task StartTalkingAsync()
+    {
+        if (!_active || _talking) return;
+        _talking = true;
+        try
+        {
+            _talkRecorder = _audioManager.CreateRecorder();
+            await _talkRecorder.StartAsync(new AudioRecorderOptions
+            {
+                SampleRate = 16000,
+                Channels = ChannelType.Mono,
+                BitDepth = BitDepth.Pcm16bit,
+                Encoding = Plugin.Maui.Audio.Encoding.Wav,
+                ThrowIfNotSupported = false
+            });
+            Log?.Invoke("PTT: recording...");
+        }
+        catch (Exception ex)
+        {
+            _talking = false;
+            Log?.Invoke($"PTT record error: {ex.Message}");
+        }
+    }
+
+    public async Task StopTalkingAsync()
+    {
+        if (!_talking || _talkRecorder == null) return;
+        _talking = false;
+        try
+        {
+            var source = await _talkRecorder.StopAsync();
+            _talkRecorder = null;
+
+            string? filePath = null;
+            if (source is FileAudioSource fsa)
+                filePath = fsa.GetFilePath();
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return;
+
+            var wavBytes = await File.ReadAllBytesAsync(filePath);
+            try { File.Delete(filePath); } catch { }
+
+            if (wavBytes.Length <= WavHelper.HeaderSize) return;
+            var pcm = WavHelper.StripHeader(wavBytes);
+            if (pcm.Length == 0) return;
+
+            int sent = 0;
+            for (int i = 0; i < pcm.Length; i += PcmChunkSize)
+            {
+                var len = Math.Min(PcmChunkSize, pcm.Length - i);
+                var chunk = new byte[len];
+                Buffer.BlockCopy(pcm, i, chunk, 0, len);
+                await _transport.SendFrameAsync(chunk);
+                sent++;
+                if (sent % 10 == 0) await Task.Delay(1);
+            }
+            Log?.Invoke($"PTT: sent {sent} chunks, {pcm.Length}B, ~{WavHelper.EstimateDurationMs(pcm.Length)}ms");
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke($"PTT send error: {ex.Message}");
+        }
     }
 
     public void Stop()
     {
         if (!_active) return;
         _active = false;
+        _talking = false;
 
         _transport.FrameReceived -= OnFrameReceived;
         _transport.Stop();
@@ -61,56 +123,6 @@ public sealed class VoiceCallManager : IDisposable
         _cts = null;
 
         while (_playbackQueue.TryDequeue(out _)) { }
-        CleanTempFiles();
-    }
-
-    private async Task RecordLoopAsync(CancellationToken ct)
-    {
-        int sentCount = 0, silentCount = 0;
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                var recorder = _audioManager.CreateRecorder();
-                var options = new AudioRecorderOptions
-                {
-                    SampleRate = 16000,
-                    Channels = ChannelType.Mono,
-                    BitDepth = BitDepth.Pcm16bit,
-                    Encoding = Plugin.Maui.Audio.Encoding.Wav,
-                    ThrowIfNotSupported = false
-                };
-                await recorder.StartAsync(options);
-                await Task.Delay(ChunkMs, ct);
-                var source = await recorder.StopAsync();
-
-                string? filePath = null;
-                if (source is FileAudioSource fsa)
-                    filePath = fsa.GetFilePath();
-                if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) continue;
-
-                var wavBytes = await File.ReadAllBytesAsync(filePath, ct);
-                TryDelete(filePath);
-
-                if (wavBytes.Length <= WavHelper.HeaderSize) continue;
-
-                var pcm = WavHelper.StripHeader(wavBytes);
-
-                var isSilent = pcm.Length > 0 && pcm.All(b => b == 0);
-                if (isSilent) silentCount++;
-                sentCount++;
-                if (sentCount % 25 == 1)
-                    Log?.Invoke($"Voice TX: sent={sentCount} silent={silentCount} pcm={pcm.Length}B");
-
-                await _transport.SendFrameAsync(pcm);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (Exception ex)
-            {
-                Log?.Invoke($"Record error: {ex.Message}");
-                try { await Task.Delay(50, ct); } catch { break; }
-            }
-        }
     }
 
     private void OnFrameReceived(byte[] pcmData)
@@ -118,16 +130,10 @@ public sealed class VoiceCallManager : IDisposable
         if (!_active || pcmData.Length == 0) return;
         _playbackQueue.Enqueue(pcmData);
         var count = Interlocked.Increment(ref _receivedCount);
-        if (count % 25 == 1)
+        if (count % 10 == 1)
             Log?.Invoke($"Voice RX: received={count} queue={_playbackQueue.Count} pcm={pcmData.Length}B");
     }
 
-    private int _receivedCount;
-
-    /// <summary>
-    /// Batched playback: accumulate several PCM frames into one WAV before playing.
-    /// Reduces per-player creation overhead and eliminates inter-chunk clicks.
-    /// </summary>
     private async Task PlaybackLoopAsync(CancellationToken ct)
     {
         int playedCount = 0;
@@ -135,24 +141,23 @@ public sealed class VoiceCallManager : IDisposable
         {
             if (_playbackQueue.IsEmpty)
             {
-                await Task.Delay(15, ct);
+                await Task.Delay(20, ct);
                 continue;
             }
 
             var batch = new List<byte[]>();
             int totalBytes = 0;
-            while (batch.Count < PlaybackBatchMaxFrames && _playbackQueue.TryDequeue(out var pcm))
+            while (batch.Count < 8 && _playbackQueue.TryDequeue(out var pcm))
             {
                 batch.Add(pcm);
                 totalBytes += pcm.Length;
             }
-
             if (batch.Count == 0) continue;
 
-            if (batch.Count < 2 && _playbackQueue.IsEmpty)
+            if (batch.Count < 3)
             {
-                await Task.Delay(PlaybackBatchMs / 3, ct);
-                while (batch.Count < PlaybackBatchMaxFrames && _playbackQueue.TryDequeue(out var extra))
+                await Task.Delay(80, ct);
+                while (batch.Count < 8 && _playbackQueue.TryDequeue(out var extra))
                 {
                     batch.Add(extra);
                     totalBytes += extra.Length;
@@ -171,43 +176,20 @@ public sealed class VoiceCallManager : IDisposable
             try
             {
                 var wav = WavHelper.WrapWithHeader(merged);
-                var stream = new MemoryStream(wav);
-                player = _audioManager.CreatePlayer(stream);
+                player = _audioManager.CreatePlayer(new MemoryStream(wav));
                 player.Play();
 
                 var durationMs = WavHelper.EstimateDurationMs(merged.Length);
-                var waitMs = Math.Max(20, durationMs - 10);
-                await Task.Delay(waitMs, ct);
+                await Task.Delay(Math.Max(20, durationMs - 20), ct);
 
                 playedCount += batch.Count;
-                if (playedCount % 25 < batch.Count)
+                if (playedCount % 10 < batch.Count)
                     Log?.Invoke($"Voice PLAY: played={playedCount} frames={batch.Count} pcm={merged.Length}B dur={durationMs}ms");
             }
             catch (OperationCanceledException) { break; }
-            catch (Exception ex)
-            {
-                Log?.Invoke($"Playback error: {ex.Message}");
-            }
-            finally
-            {
-                try { player?.Dispose(); } catch { }
-            }
+            catch (Exception ex) { Log?.Invoke($"Playback error: {ex.Message}"); }
+            finally { try { player?.Dispose(); } catch { } }
         }
-    }
-
-    private void CleanTempFiles()
-    {
-        try
-        {
-            foreach (var f in Directory.EnumerateFiles(_tempDir, "c_*.wav"))
-                TryDelete(f);
-        }
-        catch { }
-    }
-
-    private static void TryDelete(string path)
-    {
-        try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
 
     public void Dispose() => Stop();

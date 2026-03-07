@@ -49,7 +49,9 @@ namespace MassangerMaximka
         private const string CallEnd = "\x1FCALL_END";
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
-        private readonly ObservableCollection<ChatItem> _chatItems = [];
+        private ObservableCollection<ChatItem> _chatItems = [];
+        private readonly Dictionary<string, ObservableCollection<ChatItem>> _peerChats = new();
+        private string? _activeChatPeer;
         private readonly Dictionary<string, ChatItem> _pendingItems = new();
         private readonly Dictionary<string, System.Net.IPEndPoint> _peerEndpointMap = new();
         private int _techLogCount;
@@ -173,7 +175,7 @@ namespace MassangerMaximka
                 RefreshPeersList();
                 _autoConnectInFlight.Remove(nodeId);
                 var name = ResolveDisplayName(nodeId);
-                AppendChat($"[Connected] {name}");
+                AppendChat($"[Connected] {name}", toPeer: nodeId);
                 TechLog(LogCat.Network, $"TCP connected: {name} ({nodeId})" + (ep != null ? $" remote={ep}" : ""));
                 TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
             });
@@ -187,13 +189,33 @@ namespace MassangerMaximka
             return nodeId.Length > 8 ? nodeId[..8] : nodeId;
         }
 
+        private ObservableCollection<ChatItem> GetOrCreatePeerChat(string nodeId)
+        {
+            if (!_peerChats.TryGetValue(nodeId, out var chat))
+            {
+                chat = [];
+                _peerChats[nodeId] = chat;
+            }
+            return chat;
+        }
+
+        private void SwitchChat(string nodeId)
+        {
+            if (nodeId == _activeChatPeer) return;
+            _activeChatPeer = nodeId;
+            _chatItems = GetOrCreatePeerChat(nodeId);
+            ChatList.ItemsSource = _chatItems;
+            if (_chatItems.Count > 0)
+                ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
+        }
+
         private void OnPeerDisconnected(string nodeId)
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 var name = ResolveDisplayName(nodeId);
                 RefreshPeersList();
-                AppendChat($"[Disconnected] {name}");
+                AppendChat($"[Disconnected] {name}", toPeer: nodeId);
                 TechLog(LogCat.Network, $"TCP disconnected: {name} ({nodeId})");
             });
         }
@@ -263,7 +285,7 @@ namespace MassangerMaximka
                     return;
                 }
 
-                AppendChat($"{msg.FromNodeId}: {text}");
+                AppendChat($"{ResolveDisplayName(msg.FromNodeId)}: {text}", toPeer: msg.FromNodeId);
                 TechLog(LogCat.Protocol, $"RECV ChatPacket id={msg.MessageId} from={msg.FromNodeId}");
                 TechLog(LogCat.Encryption, $"Payload deserialized: {text.Length} chars, ts={msg.TimestampUtc}");
             });
@@ -395,7 +417,10 @@ namespace MassangerMaximka
             var savedEndPoint = ExtractEndPoint(s);
             if (!string.IsNullOrWhiteSpace(savedEndPoint))
                 ManualIpEntry.Text = savedEndPoint;
-            SelectedPeerLabel.Text = $"Selected: {_selectedPeerNodeId ?? "(none)"}";
+            var name = _selectedPeerNodeId != null ? ResolveDisplayName(_selectedPeerNodeId) : "(none)";
+            SelectedPeerLabel.Text = name;
+            if (_selectedPeerNodeId != null)
+                SwitchChat(_selectedPeerNodeId);
         }
 
         private async void OnPeerDoubleTapped(object? sender, TappedEventArgs e)
@@ -462,7 +487,7 @@ namespace MassangerMaximka
             TechLog(LogCat.Transport, $"SEND ChatPacket to={toNodeId} len={text.Length}");
             TechLog(LogCat.Encryption, $"Serializing envelope: JSON + length-prefix (4B header)");
             var msg = await _chat.SendMessageAsync(toNodeId, text);
-            var item = AppendChat($"Me -> {toNodeId}: {text}", status: "Sent");
+            var item = AppendChat($"Me: {text}", status: "Sent");
             _pendingItems[msg.MessageId] = item;
             TechLog(LogCat.Protocol, $"SENT id={msg.MessageId} status={msg.Status}");
         }
@@ -572,6 +597,8 @@ namespace MassangerMaximka
                 await _audioRecorder.StartAsync(CreateVoiceRecorderOptions());
                 _isRecordingVoice = true;
                 RecordBtn.BackgroundColor = Color.FromArgb("#F44336");
+                StopSendBtn.Text = "SEND";
+                StopSendBtn.BackgroundColor = Color.FromArgb("#1976D2");
                 VoiceStatusLabel.Text = "Voice: RECORDING...";
                 TechLog(LogCat.System, $"Voice recording started -> temp file, final path {_voiceRecordPath}");
             }
@@ -595,6 +622,8 @@ namespace MassangerMaximka
                 _isRecordingVoice = false;
                 _audioRecorder = null;
                 RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
+                StopSendBtn.Text = "STOP";
+                StopSendBtn.BackgroundColor = Color.FromArgb("#3A3530");
 
                 var path = await PersistVoiceRecordingAsync(source);
                 if (string.IsNullOrEmpty(path) || !File.Exists(path) || new FileInfo(path).Length <= 44)
@@ -636,6 +665,8 @@ namespace MassangerMaximka
                 _isRecordingVoice = false;
                 _audioRecorder = null;
                 RecordBtn.BackgroundColor = Color.FromArgb("#C62828");
+                StopSendBtn.Text = "STOP";
+                StopSendBtn.BackgroundColor = Color.FromArgb("#3A3530");
                 AppendChat($"[Error] Voice send failed: {ex.Message}");
                 TechLog(LogCat.System, $"Voice send error: {ex.Message}");
                 VoiceStatusLabel.Text = "Voice: idle";
@@ -729,10 +760,13 @@ namespace MassangerMaximka
                 return;
             }
 
+            RecordBtn.IsVisible = false;
+            StopSendBtn.IsVisible = false;
+            PttBtn.IsVisible = true;
             CallBtn.Text = "Hang Up";
             CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
-            VoiceStatusLabel.Text = $"Call: {nodeId}";
-            AppendChat($"[Call] Started call with {nodeId}");
+            VoiceStatusLabel.Text = "Hold Talk to speak";
+            AppendChat($"[Call] Walkie-talkie with {ResolveDisplayName(nodeId)}");
             TechLog(LogCat.Network, $"Voice call started -> {ip}:{voicePort}");
         }
 
@@ -744,6 +778,9 @@ namespace MassangerMaximka
             _isInCall = false;
             _callPeerNodeId = null;
             _callPeerIp = null;
+            RecordBtn.IsVisible = true;
+            StopSendBtn.IsVisible = true;
+            PttBtn.IsVisible = false;
             CallBtn.Text = "Call";
             CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
             VoiceStatusLabel.Text = "Voice: idle";
@@ -801,6 +838,9 @@ namespace MassangerMaximka
             _isCallingOut = false;
             _callPeerNodeId = null;
             _callPeerIp = null;
+            RecordBtn.IsVisible = true;
+            StopSendBtn.IsVisible = true;
+            PttBtn.IsVisible = false;
             CallBtn.Text = "Call";
             CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
             VoiceStatusLabel.Text = "Voice: idle";
@@ -811,6 +851,24 @@ namespace MassangerMaximka
             if (_chat == null || string.IsNullOrEmpty(nodeId)) return;
             try { await _chat.SendMessageAsync(nodeId, signal); }
             catch { }
+        }
+
+        private async void OnPttPressed(object? sender, EventArgs e)
+        {
+            if (_voiceCallManager == null || !_isInCall) return;
+            PttBtn.BackgroundColor = Color.FromArgb("#F44336");
+            PttBtn.Text = "TALKING";
+            VoiceStatusLabel.Text = "TALKING...";
+            await _voiceCallManager.StartTalkingAsync();
+        }
+
+        private async void OnPttReleased(object? sender, EventArgs e)
+        {
+            if (_voiceCallManager == null) return;
+            PttBtn.BackgroundColor = Color.FromArgb("#1976D2");
+            PttBtn.Text = "Talk";
+            VoiceStatusLabel.Text = "Hold Talk to speak";
+            await _voiceCallManager.StopTalkingAsync();
         }
 
         private static string GetLocalIpAddress()
@@ -895,12 +953,14 @@ namespace MassangerMaximka
 
         // --- Logging ---
 
-        private ChatItem AppendChat(string line, string? status = null)
+        private ChatItem AppendChat(string line, string? status = null, string? toPeer = null)
         {
+            var collection = !string.IsNullOrEmpty(toPeer) ? GetOrCreatePeerChat(toPeer) : _chatItems;
             var item = new ChatItem { Text = $"{DateTime.Now:HH:mm:ss} {line}", Status = status };
-            _chatItems.Add(item);
-            if (_chatItems.Count > 200) _chatItems.RemoveAt(0);
-            ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
+            collection.Add(item);
+            if (collection.Count > 200) collection.RemoveAt(0);
+            if (ReferenceEquals(collection, _chatItems) && collection.Count > 0)
+                ChatList.ScrollTo(collection[^1], ScrollToPosition.End, animate: false);
             return item;
         }
 
