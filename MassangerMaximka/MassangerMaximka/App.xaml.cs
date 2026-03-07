@@ -1,4 +1,4 @@
-﻿namespace MassangerMaximka
+namespace MassangerMaximka
 {
     public partial class App : Application
     {
@@ -9,7 +9,18 @@
 
         protected override Window CreateWindow(IActivationState? activationState)
         {
-            return new Window(new AppShell());
+            var window = new Window(new AppShell())
+            {
+                Title = "Hex P2P Test"
+            };
+            
+            #if MACCATALYST
+            // Set minimum window size for Mac Catalyst
+            window.MinimumWidth = 800;
+            window.MinimumHeight = 600;
+            #endif
+            
+            return window;
         }
     }
 }

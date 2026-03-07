@@ -61,10 +61,18 @@ public sealed class MessageSyncService
 
     public async Task ResendMessagesAsync(Guid requesterNodeId, IReadOnlyList<Guid> requestedIds, CancellationToken ct = default)
     {
-        foreach (var msgId in requestedIds)
+        var messages = requestedIds
+            .Select(msgId => FindMessageById(msgId))
+            .Where(msg => msg != null)
+            .OrderBy(msg => msg!.SentAtUtc)
+            .ToList();
+
+        for (var i = 0; i < messages.Count; i++)
         {
-            var msg = FindMessageById(msgId);
-            if (msg == null) continue;
+            var msg = messages[i]!;
+
+            if (i > 0)
+                await Task.Delay(50, ct);
 
             var chat = new ChatPacket
             {

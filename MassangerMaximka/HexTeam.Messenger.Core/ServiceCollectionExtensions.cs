@@ -22,9 +22,7 @@ public static class ServiceCollectionExtensions
         config ??= new NodeConfiguration();
         services.AddSingleton(config);
 
-        if (!Guid.TryParse(config.NodeId, out var nodeGuid))
-            throw new InvalidOperationException($"NodeId must be a GUID, got '{config.NodeId}'.");
-
+        var nodeGuid = Guid.TryParse(config.NodeId, out var g) ? g : Guid.NewGuid();
         var identity = new NodeIdentity(nodeGuid, config.DisplayName);
         services.AddSingleton(identity);
 
@@ -113,10 +111,10 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<ILogger<TcpChatTransport>>()));
 
         services.AddSingleton(sp =>
-            new ChannelService(
+            new Services.ChannelService(
                 config.NodeId,
                 sp.GetRequiredService<TcpChatTransport>(),
-                sp.GetRequiredService<ILogger<ChannelService>>()));
+                sp.GetRequiredService<ILogger<Services.ChannelService>>()));
 
         services.AddSingleton(sp =>
             new RelayForwarder(config.NodeId,

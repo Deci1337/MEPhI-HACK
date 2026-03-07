@@ -9,6 +9,7 @@ public sealed class UdpVoiceTransport : IDisposable
 {
     private const int DefaultVoicePort = 45679;
     private const int JitterBufferSize = 10;
+    private const int KeepaliveDataSize = 160; // 10ms silence at 16kHz mono 16-bit
 
     private readonly ILogger<UdpVoiceTransport> _logger;
     private readonly int _listenPort;
@@ -19,9 +20,12 @@ public sealed class UdpVoiceTransport : IDisposable
 
     private readonly ConcurrentQueue<VoiceFrame> _jitterBuffer = new();
     private int _sequenceNumber;
+    private int _keepaliveTxCount;
+    private int _keepaliveRxCount;
 
     public bool IsActive { get; private set; }
     public int ListenPort => _actualPort;
+    public IPEndPoint? RemoteEndPoint => _remoteEndPoint;
     public VoiceMetrics Metrics { get; } = new();
 
     // Extra endpoints for channel multicast (in addition to primary _remoteEndPoint)
@@ -57,6 +61,7 @@ public sealed class UdpVoiceTransport : IDisposable
         }
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
+        _ = SendKeepAliveAsync(_cts.Token);
         _logger.LogInformation("Voice transport started on :{Port}, remote={EP}",
             _actualPort, remoteEndPoint);
     }
@@ -72,6 +77,7 @@ public sealed class UdpVoiceTransport : IDisposable
             _udpClient = BindUdpClient(_listenPort);
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
+        _ = SendKeepAliveAsync(_cts.Token);
         _logger.LogInformation("Voice transport listening (channel mode) on :{Port}", _actualPort);
     }
 
@@ -105,13 +111,25 @@ public sealed class UdpVoiceTransport : IDisposable
 
     private async Task ReceiveLoopAsync(CancellationToken ct)
     {
+        int consecutiveErrors = 0;
         while (!ct.IsCancellationRequested && _udpClient != null)
         {
             try
             {
                 var result = await _udpClient.ReceiveAsync(ct);
+                consecutiveErrors = 0;
+
                 var frame = DeserializeFrame(result.Buffer);
                 if (frame == null) continue;
+
+                if (frame.Data.Length <= KeepaliveDataSize)
+                {
+                    var rxCount = Interlocked.Increment(ref _keepaliveRxCount);
+                    if (rxCount % 10 == 1)
+                        _logger.LogInformation("Voice keepalive RX: count={N} remote={EP}",
+                            rxCount, result.RemoteEndPoint);
+                    continue;
+                }
 
                 Metrics.FramesReceived++;
                 var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -125,7 +143,20 @@ public sealed class UdpVoiceTransport : IDisposable
                 while (_jitterBuffer.TryDequeue(out var playFrame))
                     FrameReceived?.Invoke(playFrame.Data);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException) { break; }
+            catch (SocketException ex)
+            {
+                consecutiveErrors++;
+                Metrics.PacketsLost++;
+                _logger.LogWarning(ex, "Voice socket error #{N}", consecutiveErrors);
+                if (consecutiveErrors > 50)
+                {
+                    _logger.LogError("Voice receive loop: too many consecutive socket errors, stopping");
+                    break;
+                }
+                await Task.Delay(10, ct);
+            }
+            catch (Exception ex)
             {
                 Metrics.PacketsLost++;
                 _logger.LogWarning(ex, "Voice receive error");
@@ -144,18 +175,77 @@ public sealed class UdpVoiceTransport : IDisposable
         _logger.LogInformation("Voice transport stopped (port :{Port} kept bound)", _actualPort);
     }
 
+    private async Task SendKeepAliveAsync(CancellationToken ct)
+    {
+        // 5-packet burst to punch through NAT -- 30ms intervals, 150ms total window
+        for (var burst = 0; burst < 5; burst++)
+        {
+            try
+            {
+                var ping = BuildKeepalivePacket();
+                await SendPingToAllEndpoints(ping);
+                LogKeepaliveSent();
+                await Task.Delay(30, ct);
+            }
+            catch (OperationCanceledException) { return; }
+            catch { }
+        }
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(2000, ct);
+                var ping = BuildKeepalivePacket();
+                await SendPingToAllEndpoints(ping);
+                LogKeepaliveSent();
+            }
+            catch (OperationCanceledException) { return; }
+            catch { }
+        }
+    }
+
+    private byte[] BuildKeepalivePacket() => SerializeFrame(new VoiceFrame
+    {
+        Sequence = 0,
+        TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        Data = new byte[KeepaliveDataSize]
+    });
+
+    private void LogKeepaliveSent()
+    {
+        var n = Interlocked.Increment(ref _keepaliveTxCount);
+        if (n % 10 == 1)
+            _logger.LogInformation("Voice keepalive: sent={N} remote={EP}", n, _remoteEndPoint);
+    }
+
+    private async Task SendPingToAllEndpoints(byte[] packet)
+    {
+        if (_udpClient == null) return;
+
+        if (_remoteEndPoint != null)
+            await _udpClient.SendAsync(packet, packet.Length, _remoteEndPoint);
+
+        List<IPEndPoint> extras;
+        lock (_extraEndPoints) extras = [.. _extraEndPoints];
+        foreach (var ep in extras)
+            await _udpClient.SendAsync(packet, packet.Length, ep);
+    }
+
     private static UdpClient BindUdpClient(int preferredPort)
     {
         for (var offset = 0; offset < 10; offset++)
         {
             try
             {
-                var client = new UdpClient(preferredPort + offset);
+                // Explicitly bind IPv4 to avoid Windows dual-stack issues where
+                // an IPv6 socket silently drops IPv4 peer packets.
+                var client = new UdpClient(new IPEndPoint(IPAddress.Any, preferredPort + offset));
                 return client;
             }
             catch (SocketException) { }
         }
-        return new UdpClient(0);
+        return new UdpClient(new IPEndPoint(IPAddress.Any, 0));
     }
 
     private static byte[] SerializeFrame(VoiceFrame frame)
