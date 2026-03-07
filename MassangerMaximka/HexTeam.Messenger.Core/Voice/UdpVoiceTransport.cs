@@ -8,7 +8,7 @@ namespace HexTeam.Messenger.Core.Voice;
 public sealed class UdpVoiceTransport : IDisposable
 {
     private const int DefaultVoicePort = 45679;
-    private const int JitterBufferSize = 2;
+    private const int JitterBufferSize = 10;
 
     private readonly ILogger<UdpVoiceTransport> _logger;
     private readonly int _listenPort;
@@ -90,7 +90,7 @@ public sealed class UdpVoiceTransport : IDisposable
                 while (_jitterBuffer.Count > JitterBufferSize)
                     _jitterBuffer.TryDequeue(out _);
 
-                if (_jitterBuffer.TryDequeue(out var playFrame))
+                while (_jitterBuffer.TryDequeue(out var playFrame))
                     FrameReceived?.Invoke(playFrame.Data);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

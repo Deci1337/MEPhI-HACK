@@ -166,24 +166,35 @@ namespace MassangerMaximka
                 if (ep != null)
                 {
                     _peerEndpointMap[nodeId] = ep;
-                    RememberPeer(nodeId, ep.Address.ToString(), ep.Port);
+                    var displayName = ResolveDisplayName(nodeId);
+                    RememberPeer(displayName, ep.Address.ToString(), ep.Port);
                 }
 
                 RefreshPeersList();
                 _autoConnectInFlight.Remove(nodeId);
-                AppendChat($"[Connected] {nodeId}");
-                TechLog(LogCat.Network, $"TCP connected: {nodeId}" + (ep != null ? $" remote={ep}" : ""));
+                var name = ResolveDisplayName(nodeId);
+                AppendChat($"[Connected] {name}");
+                TechLog(LogCat.Network, $"TCP connected: {name} ({nodeId})" + (ep != null ? $" remote={ep}" : ""));
                 TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
             });
+        }
+
+        private string ResolveDisplayName(string nodeId)
+        {
+            if (_discovery?.Peers.TryGetValue(nodeId, out var peer) == true
+                && !string.IsNullOrWhiteSpace(peer.DisplayName))
+                return peer.DisplayName;
+            return nodeId.Length > 8 ? nodeId[..8] : nodeId;
         }
 
         private void OnPeerDisconnected(string nodeId)
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
+                var name = ResolveDisplayName(nodeId);
                 RefreshPeersList();
-                AppendChat($"[Disconnected] {nodeId}");
-                TechLog(LogCat.Network, $"TCP disconnected: {nodeId}");
+                AppendChat($"[Disconnected] {name}");
+                TechLog(LogCat.Network, $"TCP disconnected: {name} ({nodeId})");
             });
         }
 
@@ -363,7 +374,11 @@ namespace MassangerMaximka
                 {
                     if (seen.Contains(nodeId)) continue;
                     seen.Add(nodeId);
-                    _peers.Add(FormatPeerDisplay("Peer", nodeId, "", false, false, true));
+                    var connEp = _connections.GetPeerEndPoint(nodeId);
+                    var connEpStr = connEp != null ? $"{connEp.Address}:{connEp.Port}" : "";
+                    if (!string.IsNullOrEmpty(connEpStr) && !seenEndpoints.Add(connEpStr)) continue;
+                    var name = ResolveDisplayName(nodeId);
+                    _peers.Add(FormatPeerDisplay(name, nodeId, connEpStr, false, false, true));
                 }
             foreach (var peer in _savedPeers.OrderBy(p => p.DisplayName).ThenBy(p => p.EndPoint))
             {

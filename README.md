@@ -50,9 +50,17 @@ set HEX_TCP_PORT=45681
 dotnet run --project MassangerMaximka/MassangerMaximka/
 ```
 
-### Android (через Visual Studio / Rider)
+### Android
 
 Собрать target `net9.0-android` и деплоить на устройство или эмулятор.
+
+**Если сборка падает с "Permission denied" (проект в Desktop/OneDrive):**
+
+```powershell
+.\build-android.ps1
+```
+
+Скрипт копирует проект в `C:\Temp\mifi-hack` и собирает там. APK будет в `C:\Temp\mifi-hack\MassangerMaximka\MassangerMaximka\bin\Debug\net9.0-android\`. Установить можно через `adb install` или скопировать вручную.
 
 ## Тестирование на 3 устройствах
 

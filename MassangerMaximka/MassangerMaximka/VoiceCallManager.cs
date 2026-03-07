@@ -5,13 +5,14 @@ using Plugin.Maui.Audio;
 namespace MassangerMaximka;
 
 /// <summary>
-/// Manages real-time voice call lifecycle: overlapped recording in 200ms chunks,
-/// WAV header stripping for transmission, and queued sequential playback.
+/// Manages real-time voice call lifecycle: overlapped recording in chunks,
+/// WAV header stripping for transmission, and batched sequential playback.
 /// </summary>
 public sealed class VoiceCallManager : IDisposable
 {
     private const int ChunkMs = 200;
-    private const int PlaybackOverlapMs = 20;
+    private const int PlaybackBatchMs = 600;
+    private const int PlaybackBatchMaxFrames = 5;
 
     private readonly UdpVoiceTransport _transport;
     private readonly IAudioManager _audioManager;
@@ -123,32 +124,64 @@ public sealed class VoiceCallManager : IDisposable
 
     private int _receivedCount;
 
+    /// <summary>
+    /// Batched playback: accumulate several PCM frames into one WAV before playing.
+    /// Reduces per-player creation overhead and eliminates inter-chunk clicks.
+    /// </summary>
     private async Task PlaybackLoopAsync(CancellationToken ct)
     {
         int playedCount = 0;
         while (!ct.IsCancellationRequested)
         {
-            if (!_playbackQueue.TryDequeue(out var pcm))
+            if (_playbackQueue.IsEmpty)
             {
-                await Task.Delay(10, ct);
+                await Task.Delay(15, ct);
                 continue;
+            }
+
+            var batch = new List<byte[]>();
+            int totalBytes = 0;
+            while (batch.Count < PlaybackBatchMaxFrames && _playbackQueue.TryDequeue(out var pcm))
+            {
+                batch.Add(pcm);
+                totalBytes += pcm.Length;
+            }
+
+            if (batch.Count == 0) continue;
+
+            if (batch.Count < 2 && _playbackQueue.IsEmpty)
+            {
+                await Task.Delay(PlaybackBatchMs / 3, ct);
+                while (batch.Count < PlaybackBatchMaxFrames && _playbackQueue.TryDequeue(out var extra))
+                {
+                    batch.Add(extra);
+                    totalBytes += extra.Length;
+                }
+            }
+
+            var merged = new byte[totalBytes];
+            int offset = 0;
+            foreach (var chunk in batch)
+            {
+                Buffer.BlockCopy(chunk, 0, merged, offset, chunk.Length);
+                offset += chunk.Length;
             }
 
             IAudioPlayer? player = null;
             try
             {
-                var wav = WavHelper.WrapWithHeader(pcm);
+                var wav = WavHelper.WrapWithHeader(merged);
                 var stream = new MemoryStream(wav);
                 player = _audioManager.CreatePlayer(stream);
                 player.Play();
 
-                var durationMs = WavHelper.EstimateDurationMs(pcm.Length);
-                var waitMs = Math.Max(10, durationMs + 10);
+                var durationMs = WavHelper.EstimateDurationMs(merged.Length);
+                var waitMs = Math.Max(20, durationMs - 10);
                 await Task.Delay(waitMs, ct);
 
-                playedCount++;
-                if (playedCount % 25 == 1)
-                    Log?.Invoke($"Voice PLAY: played={playedCount} pcm={pcm.Length}B dur={durationMs}ms");
+                playedCount += batch.Count;
+                if (playedCount % 25 < batch.Count)
+                    Log?.Invoke($"Voice PLAY: played={playedCount} frames={batch.Count} pcm={merged.Length}B dur={durationMs}ms");
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
