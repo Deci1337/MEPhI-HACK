@@ -43,7 +43,8 @@ namespace MassangerMaximka
         private VoiceCallManager? _voiceCallManager;
 
         private const string CallRequestPrefix = "\x1FCALL_REQUEST:";
-        private const string CallAccept = "\x1FCALL_ACCEPT";
+        private const string CallAcceptPrefix = "\x1FCALL_ACCEPT:";
+        private const string CallAcceptLegacy = "\x1FCALL_ACCEPT";
         private const string CallReject = "\x1FCALL_REJECT";
         private const string CallEnd = "\x1FCALL_END";
         private readonly ObservableCollection<string> _peers = [];
@@ -209,12 +210,19 @@ namespace MassangerMaximka
                     return;
                 }
 
-                if (text == CallAccept)
+                if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal) || text == CallAcceptLegacy)
                 {
                     if (_isCallingOut && _callPeerNodeId == msg.FromNodeId && _callPeerIp != null)
                     {
                         _isCallingOut = false;
-                        TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId}");
+                        if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal))
+                        {
+                            var payload = text[CallAcceptPrefix.Length..];
+                            var colonIdx = payload.LastIndexOf(':');
+                            if (colonIdx > 0 && int.TryParse(payload[(colonIdx + 1)..], out var peerVp))
+                                _callPeerVoicePort = peerVp;
+                        }
+                        TechLog(LogCat.Protocol, $"CALL_ACCEPT from {msg.FromNodeId} voice_port={_callPeerVoicePort}");
                         _ = StartCallAsync(_callPeerNodeId, _callPeerIp, _callPeerVoicePort);
                     }
                     return;
@@ -710,12 +718,14 @@ namespace MassangerMaximka
 
             if (string.IsNullOrEmpty(fromNodeId) || callerIp == null) return;
 
-            await SendCallSignalAsync(fromNodeId, CallAccept);
+            var localIp = GetLocalIpAddress();
+            var localVoicePort = _voice?.ListenPort ?? 45679;
+            await SendCallSignalAsync(fromNodeId, $"{CallAcceptPrefix}{localIp}:{localVoicePort}");
             _callPeerNodeId = fromNodeId;
             _callPeerIp = callerIp;
             _callPeerVoicePort = callerVoicePort;
             await StartCallAsync(fromNodeId, callerIp, callerVoicePort);
-            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId}");
+            TechLog(LogCat.Protocol, $"CALL_ACCEPT sent to {fromNodeId} local_voice={localIp}:{localVoicePort}");
         }
 
         private async void OnDeclineCallClicked(object? sender, EventArgs e)

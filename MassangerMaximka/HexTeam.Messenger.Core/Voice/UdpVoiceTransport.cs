@@ -20,7 +20,8 @@ public sealed class UdpVoiceTransport : IDisposable
     private int _sequenceNumber;
 
     public bool IsActive { get; private set; }
-    public int ListenPort => _listenPort;
+    public int ListenPort => _actualPort ?? _listenPort;
+    private int? _actualPort;
     public VoiceMetrics Metrics { get; } = new();
 
     public event Action<byte[]>? FrameReceived;
@@ -40,9 +41,11 @@ public sealed class UdpVoiceTransport : IDisposable
         _sequenceNumber = 0;
 
         _udpClient = BindUdpClient(_listenPort);
+        _actualPort = (_udpClient.Client.LocalEndPoint as IPEndPoint)?.Port;
         IsActive = true;
         _ = ReceiveLoopAsync(_cts.Token);
-        _logger.LogInformation("Voice transport started on :{Port}, remote={EP}", _udpClient.Client.LocalEndPoint, remoteEndPoint);
+        _logger.LogInformation("Voice transport started on :{Port} (configured={Cfg}), remote={EP}",
+            _actualPort, _listenPort, remoteEndPoint);
     }
 
     public async Task SendFrameAsync(byte[] pcmData)

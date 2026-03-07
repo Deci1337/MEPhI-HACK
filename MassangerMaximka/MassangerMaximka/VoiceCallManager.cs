@@ -65,6 +65,7 @@ public sealed class VoiceCallManager : IDisposable
 
     private async Task RecordLoopAsync(CancellationToken ct)
     {
+        int sentCount = 0, silentCount = 0;
         while (!ct.IsCancellationRequested)
         {
             try
@@ -93,6 +94,13 @@ public sealed class VoiceCallManager : IDisposable
                 if (wavBytes.Length <= WavHelper.HeaderSize) continue;
 
                 var pcm = WavHelper.StripHeader(wavBytes);
+
+                var isSilent = pcm.Length > 0 && pcm.All(b => b == 0);
+                if (isSilent) silentCount++;
+                sentCount++;
+                if (sentCount % 25 == 1)
+                    Log?.Invoke($"Voice TX: sent={sentCount} silent={silentCount} pcm={pcm.Length}B");
+
                 await _transport.SendFrameAsync(pcm);
             }
             catch (OperationCanceledException) { break; }
@@ -108,10 +116,16 @@ public sealed class VoiceCallManager : IDisposable
     {
         if (!_active || pcmData.Length == 0) return;
         _playbackQueue.Enqueue(pcmData);
+        var count = Interlocked.Increment(ref _receivedCount);
+        if (count % 25 == 1)
+            Log?.Invoke($"Voice RX: received={count} queue={_playbackQueue.Count} pcm={pcmData.Length}B");
     }
+
+    private int _receivedCount;
 
     private async Task PlaybackLoopAsync(CancellationToken ct)
     {
+        int playedCount = 0;
         while (!ct.IsCancellationRequested)
         {
             if (!_playbackQueue.TryDequeue(out var pcm))
@@ -120,21 +134,30 @@ public sealed class VoiceCallManager : IDisposable
                 continue;
             }
 
+            IAudioPlayer? player = null;
             try
             {
                 var wav = WavHelper.WrapWithHeader(pcm);
-                using var stream = new MemoryStream(wav);
-                var player = _audioManager.CreatePlayer(stream);
+                var stream = new MemoryStream(wav);
+                player = _audioManager.CreatePlayer(stream);
                 player.Play();
 
                 var durationMs = WavHelper.EstimateDurationMs(pcm.Length);
-                var waitMs = Math.Max(10, durationMs - PlaybackOverlapMs);
+                var waitMs = Math.Max(10, durationMs + 10);
                 await Task.Delay(waitMs, ct);
+
+                playedCount++;
+                if (playedCount % 25 == 1)
+                    Log?.Invoke($"Voice PLAY: played={playedCount} pcm={pcm.Length}B dur={durationMs}ms");
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
                 Log?.Invoke($"Playback error: {ex.Message}");
+            }
+            finally
+            {
+                try { player?.Dispose(); } catch { }
             }
         }
     }

@@ -14,6 +14,14 @@ if ! $ADB devices | grep -q 'device$'; then
   exit 1
 fi
 
+VOICE_PORT=45780
+AUTH_TOKEN=$(cat "$HOME/.emulator_console_auth_token" 2>/dev/null || echo "")
+if [ -n "$AUTH_TOKEN" ]; then
+  echo "Setting up UDP port forwarding (voice port $VOICE_PORT)..."
+  (echo "auth $AUTH_TOKEN"; sleep 0.3; echo "redir add udp:${VOICE_PORT}:${VOICE_PORT}"; sleep 0.3; echo "quit") \
+    | nc localhost 5554 > /dev/null 2>&1 || true
+fi
+
 echo "Building and installing..."
 dotnet build MassangerMaximka/MassangerMaximka.csproj -f net9.0-android -t:Install \
   -p:JavaSdkDirectory="$JDK" \
