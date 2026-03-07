@@ -6,6 +6,7 @@ namespace HexTeam.Messenger.Core.Storage;
 public sealed class InMemoryMessageStore : IMessageStore
 {
     private readonly ConcurrentDictionary<Guid, ChatMessage> _messages = new();
+    private readonly ConcurrentDictionary<string, Guid> _sessionByPeer = new();
 
     public void Add(ChatMessage message)
     {
@@ -39,4 +40,13 @@ public sealed class InMemoryMessageStore : IMessageStore
             .Where(m => m.SenderNodeId.ToString() == nodeId)
             .Select(m => (Guid?)m.SessionId)
             .FirstOrDefault();
+
+    public Guid GetOrCreateSessionId(string nodeId)
+    {
+        var existingSession = GetSessionIdForPeer(nodeId);
+        if (existingSession.HasValue)
+            return existingSession.Value;
+
+        return _sessionByPeer.GetOrAdd(nodeId, _ => Guid.CreateVersion7());
+    }
 }

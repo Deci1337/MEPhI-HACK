@@ -11,4 +11,5 @@ public interface IMessageStore
     bool Contains(Guid messageId);
     void UpdateDeliveryState(Guid messageId, MessageDeliveryState state);
     Guid? GetSessionIdForPeer(string nodeId);
+    Guid GetOrCreateSessionId(string nodeId);
 }

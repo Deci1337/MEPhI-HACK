@@ -26,6 +26,7 @@ public sealed class PacketRouter
     public event Action<Guid, Guid>? PeerReconnected;
     public event Action<Guid>? SyncStarted;
     public event Action<Guid>? SyncCompleted;
+    public event Action<Guid, string>? PacketRejected;
 
     public PacketRouter(
         RelayService relay,
@@ -108,14 +109,23 @@ public sealed class PacketRouter
             return;
         }
 
+        using var syncTimeoutCts = new CancellationTokenSource(ProtocolConstants.SyncTimeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, syncTimeoutCts.Token);
+
         try
         {
             SyncStarted?.Invoke(peerNodeId);
-            await _sync.SendInventoryAsync(sessionId, peerNodeId, ct);
+            await _sync.SendInventoryAsync(sessionId, peerNodeId, linkedCts.Token);
             _logger.LogInformation("Sent inventory to reconnected peer {Peer} for session {Session}",
                 peerNodeId, sessionId);
             PeerReconnected?.Invoke(peerNodeId, sessionId);
             SyncCompleted?.Invoke(peerNodeId);
+            tcs.TrySetResult();
+        }
+        catch (OperationCanceledException) when (syncTimeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Sync with peer {Peer} for session {Session} timed out after {Timeout}s",
+                peerNodeId, sessionId, ProtocolConstants.SyncTimeout.TotalSeconds);
             tcs.TrySetResult();
         }
         catch (Exception ex)
@@ -137,6 +147,7 @@ public sealed class PacketRouter
         {
             _logger.LogWarning("Rejected packet: empty PacketId from {Sender} (PacketType={Type}, SessionId={Session})",
                 receivedFromNodeId, envelope.PacketType, envelope.SessionId);
+            PacketRejected?.Invoke(envelope.PacketId, "EmptyPacketId");
             return false;
         }
 
@@ -144,6 +155,7 @@ public sealed class PacketRouter
         {
             _logger.LogWarning("Rejected packet {PacketId}: origin validation failed (origin={Origin}, hop={Hop}, sender={Sender})",
                 envelope.PacketId, envelope.OriginNodeId, envelope.HopCount, receivedFromNodeId);
+            PacketRejected?.Invoke(envelope.PacketId, "OriginValidationFailed");
             return false;
         }
 
@@ -151,6 +163,7 @@ public sealed class PacketRouter
         {
             _logger.LogWarning("Rejected packet {PacketId}: null payload from {Sender} (PacketType={Type})",
                 envelope.PacketId, receivedFromNodeId, envelope.PacketType);
+            PacketRejected?.Invoke(envelope.PacketId, "NullPayload");
             return false;
         }
 
@@ -158,6 +171,7 @@ public sealed class PacketRouter
         {
             _logger.LogWarning("Rejected packet {PacketId}: unknown PacketType {Type} from {Sender}",
                 envelope.PacketId, (byte)envelope.PacketType, receivedFromNodeId);
+            PacketRejected?.Invoke(envelope.PacketId, "UnknownPacketType");
             return false;
         }
 
@@ -165,6 +179,15 @@ public sealed class PacketRouter
         {
             _logger.LogWarning("Rejected packet {PacketId}: negative HopCount {Hop} from {Sender}",
                 envelope.PacketId, envelope.HopCount, receivedFromNodeId);
+            PacketRejected?.Invoke(envelope.PacketId, "NegativeHopCount");
+            return false;
+        }
+
+        if (envelope.PacketType != PacketType.Ping && envelope.Payload.Length == 0)
+        {
+            _logger.LogWarning("Rejected packet {PacketId}: empty payload for PacketType={Type} from {Sender}",
+                envelope.PacketId, envelope.PacketType, receivedFromNodeId);
+            PacketRejected?.Invoke(envelope.PacketId, "EmptyPayload");
             return false;
         }
 

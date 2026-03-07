@@ -101,6 +101,18 @@ public static class ServiceCollectionExtensions
             return router;
         });
 
+        services.AddSingleton<IHexChatService>(sp =>
+        {
+            var svc = new HexChatService(
+                sp.GetRequiredService<ITransport>(),
+                sp.GetRequiredService<PacketRouter>(),
+                sp.GetRequiredService<NodeIdentity>(),
+                sp.GetRequiredService<IMessageStore>(),
+                sp.GetRequiredService<RetryPolicy>(),
+                sp.GetRequiredService<ILogger<HexChatService>>());
+            return svc;
+        });
+
         services.AddSingleton(sp =>
             new UdpDiscoveryService(config.NodeId, config.DisplayName, config.TcpPort, config.DiscoveryPort, config.IsRelay,
                 sp.GetRequiredService<ILogger<UdpDiscoveryService>>()));

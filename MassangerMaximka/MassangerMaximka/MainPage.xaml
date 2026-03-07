@@ -27,10 +27,6 @@
     </ContentPage.Resources>
 
     <Grid x:Name="RootLayout" ColumnSpacing="0" RowSpacing="0">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="{OnIdiom Phone=0, Default=280}" />
             <ColumnDefinition Width="*" />
@@ -38,7 +34,7 @@
         </Grid.ColumnDefinitions>
 
         <!-- ====== LEFT: Peers sidebar ====== -->
-        <Grid x:Name="SidebarPanel" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2"
+        <Grid x:Name="SidebarPanel" Grid.Column="0" 
               BackgroundColor="{StaticResource CoalPanel}"
               RowDefinitions="Auto,Auto,*,Auto" RowSpacing="0">
 
@@ -77,7 +73,7 @@
             <CollectionView Grid.Row="2" x:Name="PeersList" SelectionMode="Single"
                             SelectionChanged="OnPeerSelected">
                 <CollectionView.ItemTemplate>
-                    <DataTemplate x:DataType="x:String">
+                    <DataTemplate >
                         <Grid Padding="16,6,16,6" MinimumHeightRequest="{OnIdiom Phone=56, Default=50}">
                             <Grid.GestureRecognizers>
                                 <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
@@ -145,11 +141,11 @@
         </Grid>
 
         <!-- Vertical divider (desktop only) -->
-        <BoxView x:Name="SidebarDivider" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2"
+        <BoxView x:Name="SidebarDivider" Grid.Column="0" 
                  WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="End" />
 
         <!-- ====== RIGHT: Chat panel ====== -->
-        <Grid x:Name="ChatPanel" Grid.Column="1" Grid.Row="0" Grid.RowSpan="2"
+        <Grid x:Name="ChatPanel" Grid.Column="1" 
               BackgroundColor="{StaticResource Coal}"
               RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" RowSpacing="0">
 
@@ -489,7 +485,7 @@
         </Grid>
 
         <!-- ====== RIGHT: Logs panel (Desktop only) ====== -->
-        <Grid x:Name="DiagnosticsPanel" Grid.Column="2" Grid.Row="0" Grid.RowSpan="2"
+        <Grid x:Name="DiagnosticsPanel" Grid.Column="2" 
               BackgroundColor="{StaticResource CoalPanel}"
               RowDefinitions="Auto,Auto,*" RowSpacing="0"
               IsVisible="{OnIdiom Phone=False, Default=True}">

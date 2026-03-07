@@ -148,4 +148,31 @@ public class RetryPolicyTests
         Assert.Single(transport.Sent);
         Assert.Equal(envelope.PacketId, transport.Sent[0].Envelope.PacketId);
     }
+
+    [Fact]
+    public void Retry_starts_after_timeout_simulation()
+    {
+        // AckTimeout is 5 s. ForceTick sets LastAttemptAt = MinValue to simulate elapsed timeout.
+        var transport = new FakeTransport(NodeB);
+        var store = new InMemoryMessageStore();
+
+        var retry = new RetryPolicy(transport, store);
+        var envelope = MakeEnvelope(Guid.NewGuid());
+        retry.Track(envelope, NodeB);
+
+        // Packet is tracked; no retry has happened yet.
+        Assert.Empty(transport.Sent);
+        Assert.Equal(AckWaitState.Waiting, retry.GetState(envelope.PacketId));
+
+        // Simulate AckTimeout elapsed: ForceTick sets LastAttemptAt to DateTimeOffset.MinValue,
+        // causing the timeout check (now - LastAttemptAt >= AckTimeout) to pass immediately.
+        retry.ForceTick();
+
+        // After one elapsed timeout, the packet must have been resent exactly once.
+        Assert.Single(transport.Sent);
+        Assert.Equal(envelope.PacketId, transport.Sent[0].Envelope.PacketId);
+
+        // State must still be Waiting (retry count 1 < MaxRetryCount 3).
+        Assert.Equal(AckWaitState.Waiting, retry.GetState(envelope.PacketId));
+    }
 }

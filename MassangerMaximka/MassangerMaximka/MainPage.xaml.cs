@@ -1773,12 +1773,9 @@ namespace MassangerMaximka
                 // Mobile master-detail: show EITHER peers list OR chat, not both
                 RootLayout.ColumnDefinitions[0].Width = GridLength.Star;
                 RootLayout.ColumnDefinitions[1].Width = new GridLength(0);
-                Grid.SetRow(SidebarPanel, 0);
+                RootLayout.ColumnDefinitions[2].Width = new GridLength(0);
                 Grid.SetColumn(SidebarPanel, 0);
-                Grid.SetRowSpan(SidebarPanel, 2);
-                Grid.SetRow(ChatPanel, 0);
                 Grid.SetColumn(ChatPanel, 0);
-                Grid.SetRowSpan(ChatPanel, 2);
                 SidebarPanel.MaximumHeightRequest = double.PositiveInfinity;
                 PeersList.HeightRequest = -1;
 
@@ -1792,12 +1789,9 @@ namespace MassangerMaximka
                 // Desktop: show both panels side-by-side
                 RootLayout.ColumnDefinitions[0].Width = new GridLength(DeviceInfo.Idiom == DeviceIdiom.Phone ? 160 : 220);
                 RootLayout.ColumnDefinitions[1].Width = GridLength.Star;
-                Grid.SetRow(SidebarPanel, 0);
+                RootLayout.ColumnDefinitions[2].Width = new GridLength(DeviceInfo.Idiom == DeviceIdiom.Phone ? 0 : 320);
                 Grid.SetColumn(SidebarPanel, 0);
-                Grid.SetRowSpan(SidebarPanel, 2);
-                Grid.SetRow(ChatPanel, 0);
                 Grid.SetColumn(ChatPanel, 1);
-                Grid.SetRowSpan(ChatPanel, 2);
                 SidebarPanel.MaximumHeightRequest = double.PositiveInfinity;
                 PeersList.HeightRequest = -1;
                 SidebarPanel.IsVisible = true;
