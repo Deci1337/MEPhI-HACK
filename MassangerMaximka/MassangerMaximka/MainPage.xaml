@@ -128,7 +128,7 @@
             <!-- Channel status bar (visible when in a channel) -->
             <Grid Grid.Row="1" x:Name="ChannelBar" IsVisible="False"
                   BackgroundColor="#0D1F0D" Padding="10,5,10,5"
-                  ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                  ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
                 <StackLayout Grid.Column="0" Spacing="1" VerticalOptions="Center">
                     <Label x:Name="ChannelInfoLabel"
                            Text="Channel: — | Members: 0"
@@ -136,7 +136,11 @@
                     <Label x:Name="ChannelPttLabel" IsVisible="False"
                            TextColor="#FF9800" FontSize="11" FontAttributes="Bold" />
                 </StackLayout>
-                <Button Grid.Column="1" x:Name="LeaveChannelBtn" Text="Leave"
+                <Button Grid.Column="1" Text="Invite+" Clicked="OnInviteToChannelClicked"
+                        BackgroundColor="#1A3A1A"
+                        TextColor="#88CC88"
+                        FontSize="9" Padding="8,3" CornerRadius="3" />
+                <Button Grid.Column="2" x:Name="LeaveChannelBtn" Text="Leave"
                         Clicked="OnLeaveChannelClicked"
                         BackgroundColor="{StaticResource DangerRed}"
                         TextColor="{StaticResource SeaShell}"

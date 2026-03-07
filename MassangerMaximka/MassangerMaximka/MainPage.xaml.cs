@@ -62,6 +62,7 @@ namespace MassangerMaximka
         private string? _activeChatPeer;
         private readonly Dictionary<string, ChatItem> _pendingItems = new();
         private readonly Dictionary<string, System.Net.IPEndPoint> _peerEndpointMap = new();
+        private readonly HashSet<string> _unreadPeers = new();
         private int _techLogCount;
         private volatile bool _suppressTechLog;
 
@@ -226,8 +227,13 @@ namespace MassangerMaximka
         {
             if (nodeId == _activeChatPeer) return;
             _activeChatPeer = nodeId;
+            _activeChannelId = null;
             _chatItems = GetOrCreatePeerChat(nodeId);
             ChatList.ItemsSource = _chatItems;
+            ChannelBar.IsVisible = false;
+            SelectedPeerLabel.Text = ResolveDisplayName(nodeId);
+            if (_unreadPeers.Remove(nodeId))
+                RefreshPeersList();
             if (_chatItems.Count > 0)
                 ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
         }
@@ -367,6 +373,16 @@ namespace MassangerMaximka
                 else
                 {
                     AppendChat($"{senderName}: {text}", toPeer: msg.FromNodeId);
+                    if (_activeChatPeer != msg.FromNodeId && _activeChannelId == null)
+                    {
+                        if (_activeChatPeer == null)
+                            SwitchChat(msg.FromNodeId);
+                        else
+                        {
+                            _unreadPeers.Add(msg.FromNodeId);
+                            RefreshPeersList();
+                        }
+                    }
                 }
                 TechLog(LogCat.Protocol, $"RECV ChatPacket id={msg.MessageId} from={msg.FromNodeId}");
                 TechLog(LogCat.Encryption, $"Payload deserialized: {text.Length} chars, ts={msg.TimestampUtc}");
@@ -488,23 +504,31 @@ namespace MassangerMaximka
         private async Task InvitePeersToChannelAsync()
         {
             if (_channelService == null) return;
-            var connected = _connections?.Connections.Keys.ToList() ?? [];
+            var connected = _connections?.Connections.Keys
+                .Where(id => !_channelMembers.Contains(id))
+                .ToList() ?? [];
             if (connected.Count == 0)
             {
-                AppendToChannelChat("[Channel] No connected peers to invite.");
+                AppendToChannelChat("[Channel] No new peers to invite.");
                 return;
             }
-            var names = connected.Select(id => $"{ResolveDisplayName(id)} ({id})").ToArray();
-            var picked = await DisplayActionSheet("Invite to channel", "Done", null, names);
-            if (string.IsNullOrEmpty(picked) || picked == "Done") return;
 
-            var colonIdx = picked.LastIndexOf('(');
-            var nodeId = colonIdx > 0 ? picked[(colonIdx + 1)..].TrimEnd(')') : null;
-            if (string.IsNullOrEmpty(nodeId)) return;
+            bool inviting = true;
+            while (inviting && connected.Count > 0)
+            {
+                var names = connected.Select(id => $"{ResolveDisplayName(id)} ({id})").ToArray();
+                var picked = await DisplayActionSheet("Invite to channel", "Done", null, names);
+                if (string.IsNullOrEmpty(picked) || picked == "Done") break;
 
-            await _channelService.SendInvite(nodeId);
-            AppendToChannelChat($"[Channel] Invite sent to {ResolveDisplayName(nodeId)}");
-            TechLog(LogCat.Protocol, $"Channel invite sent to {nodeId}");
+                var parenIdx = picked.LastIndexOf('(');
+                var nodeId = parenIdx > 0 ? picked[(parenIdx + 1)..].TrimEnd(')') : null;
+                if (string.IsNullOrEmpty(nodeId)) continue;
+
+                await _channelService.SendInvite(nodeId);
+                AppendToChannelChat($"[Channel] Invite sent to {ResolveDisplayName(nodeId)}");
+                TechLog(LogCat.Protocol, $"Channel invite sent to {nodeId}");
+                connected.Remove(nodeId);
+            }
         }
 
         private void OnChannelInviteReceived(ChannelPacket invite)
@@ -568,20 +592,29 @@ namespace MassangerMaximka
                 ChatList.ScrollTo(item, ScrollToPosition.End, animate: false);
         }
 
+        private async void OnInviteToChannelClicked(object? sender, EventArgs e)
+        {
+            if (_channelService == null || _activeChannelId == null) return;
+            await InvitePeersToChannelAsync();
+        }
+
         private async void OnLeaveChannelClicked(object? sender, EventArgs e)
         {
             if (_channelService == null) return;
+            if (_isInCall) EndCall();
             await _channelService.LeaveChannel();
             _activeChannelId = null;
             _channelChat = null;
             _channelMembers = [];
             _activeChannelName = null;
+            _activeChatPeer = null;
             ChannelBar.IsVisible = false;
             ChannelPttLabel.IsVisible = false;
             _chatItems = [];
             ChatList.ItemsSource = _chatItems;
             SelectedPeerLabel.Text = "Select a peer";
             _voice?.ClearExtraEndPoints();
+            RefreshPeersList();
             TechLog(LogCat.Protocol, "Left channel");
         }
 
@@ -651,15 +684,7 @@ namespace MassangerMaximka
             var savedEndPoint = ExtractEndPoint(s);
             if (!string.IsNullOrWhiteSpace(savedEndPoint))
                 ManualIpEntry.Text = savedEndPoint;
-            var name = _selectedPeerNodeId != null ? ResolveDisplayName(_selectedPeerNodeId) : "(none)";
 
-            if (_activeChannelId != null)
-            {
-                SelectedPeerLabel.Text = name;
-                return;
-            }
-
-            SelectedPeerLabel.Text = name;
             if (_selectedPeerNodeId != null)
                 SwitchChat(_selectedPeerNodeId);
         }
@@ -1531,7 +1556,7 @@ namespace MassangerMaximka
             return s > 0 && e > s ? display[s..e] : null;
         }
 
-        private static string FormatPeerDisplay(
+        private string FormatPeerDisplay(
             string displayName,
             string? nodeId,
             string endPoint,
@@ -1543,6 +1568,7 @@ namespace MassangerMaximka
             if (isSaved) parts.Add("saved");
             if (isOnline) parts.Add("online");
             if (isConnected) parts.Add("connected");
+            if (nodeId != null && _unreadPeers.Contains(nodeId)) parts.Add("NEW");
             var status = parts.Count == 0 ? "" : $"[{string.Join(" | ", parts)}] ";
             var node = string.IsNullOrWhiteSpace(nodeId) ? "" : $" ({nodeId})";
             var ep = string.IsNullOrWhiteSpace(endPoint) ? "" : $" [{endPoint}]";
