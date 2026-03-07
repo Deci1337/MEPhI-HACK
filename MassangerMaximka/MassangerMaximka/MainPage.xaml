@@ -269,9 +269,11 @@
                         <StackLayout Padding="0,4">
                             <!-- Text bubble -->
                             <Grid IsVisible="{Binding IsText}" HorizontalOptions="{Binding BubbleAlign}">
-                                <Grid BackgroundColor="{Binding BubbleBg}"
-                                      MaximumWidthRequest="500"
-                                      Padding="{Binding BubblePadding}">
+                                <Border BackgroundColor="{Binding BubbleBg}"
+                                        Stroke="{Binding BubbleStrokeColor}"
+                                        StrokeThickness="{Binding BubbleStrokeThickness}"
+                                        MaximumWidthRequest="500"
+                                        Padding="{Binding BubblePadding}">
                                     <StackLayout Spacing="4">
                                         <Label Text="{Binding Text}"
                                                FontFamily="OpenSansRegular"
@@ -286,11 +288,14 @@
                                                BackgroundColor="Transparent"
                                                HorizontalOptions="End" />
                                     </StackLayout>
-                                </Grid>
+                                </Border>
                             </Grid>
                             <!-- Voice message -->
                             <Grid IsVisible="{Binding IsVoice}" HorizontalOptions="{Binding BubbleAlign}">
-                                <Grid BackgroundColor="{Binding BubbleBg}" Padding="12,10">
+                                <Border BackgroundColor="{Binding BubbleBg}"
+                                        Stroke="{Binding BubbleStrokeColor}"
+                                        StrokeThickness="{Binding BubbleStrokeThickness}"
+                                        Padding="12,10">
                                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                                         <Button Grid.Column="0" Text="▶"
                                                 BackgroundColor="Transparent"
@@ -306,11 +311,14 @@
                                                BackgroundColor="Transparent"
                                                VerticalOptions="Center" LineBreakMode="TailTruncation" />
                                     </Grid>
-                                </Grid>
+                                </Border>
                             </Grid>
                             <!-- Image message -->
                             <Grid IsVisible="{Binding IsImage}" HorizontalOptions="{Binding BubbleAlign}">
-                                <Grid BackgroundColor="{Binding BubbleBg}" Padding="8">
+                                <Border BackgroundColor="{Binding BubbleBg}"
+                                        Stroke="{Binding BubbleStrokeColor}"
+                                        StrokeThickness="{Binding BubbleStrokeThickness}"
+                                        Padding="8">
                                     <StackLayout Spacing="8">
                                         <Label Text="{Binding Text}"
                                                FontFamily="OpenSansRegular"
@@ -321,7 +329,7 @@
                                                HeightRequest="240" WidthRequest="240"
                                                Aspect="AspectFill" />
                                     </StackLayout>
-                                </Grid>
+                                </Border>
                             </Grid>
                         </StackLayout>
                     </DataTemplate>
