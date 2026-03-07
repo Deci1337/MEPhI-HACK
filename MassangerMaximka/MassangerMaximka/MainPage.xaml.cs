@@ -50,6 +50,7 @@ namespace MassangerMaximka
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
         private readonly ObservableCollection<ChatItem> _chatItems = [];
+        private readonly Dictionary<string, ChatItem> _pendingItems = new();
         private readonly Dictionary<string, System.Net.IPEndPoint> _peerEndpointMap = new();
         private int _techLogCount;
         private volatile bool _suppressTechLog;
@@ -163,7 +164,10 @@ namespace MassangerMaximka
             {
                 var ep = _connections?.GetPeerEndPoint(nodeId);
                 if (ep != null)
+                {
                     _peerEndpointMap[nodeId] = ep;
+                    RememberPeer(nodeId, ep.Address.ToString(), ep.Port);
+                }
 
                 RefreshPeersList();
                 _autoConnectInFlight.Remove(nodeId);
@@ -257,7 +261,11 @@ namespace MassangerMaximka
         private void OnDeliveryStatusChanged(string messageId, DeliveryStatus status)
         {
             MainThread.BeginInvokeOnMainThread(() =>
-                TechLog(LogCat.Protocol, $"Delivery {messageId}: {status}"));
+            {
+                if (_pendingItems.TryGetValue(messageId, out var item))
+                    item.Status = status.ToString();
+                TechLog(LogCat.Protocol, $"Delivery {messageId}: {status}");
+            });
         }
 
         private void OnTransferProgressChanged(TransportFileTransferInfo transfer)
@@ -283,8 +291,11 @@ namespace MassangerMaximka
                 }
 
                 var fileName = Path.GetFileName(savedPath);
-                FileTransferLabel.Text = $"File received: {fileName}";
-                TechLog(LogCat.Protocol, $"FILE RECV complete id={transferId} path={savedPath}");
+                var integrityOk = _files?.ActiveTransfers.TryGetValue(transferId, out var tf) == true
+                    && tf?.State == FileTransferState.Completed;
+                var integrityTag = integrityOk ? " SHA256 OK" : " SHA256 FAIL";
+                FileTransferLabel.Text = $"File received: {fileName}{integrityTag}";
+                TechLog(LogCat.Protocol, $"FILE RECV complete id={transferId} integrity={integrityOk} path={savedPath}");
 
                 if (fileName.StartsWith("voice_", StringComparison.OrdinalIgnoreCase) &&
                     fileName.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
@@ -294,7 +305,7 @@ namespace MassangerMaximka
                 }
                 else
                 {
-                    AppendChat($"[File] {fileName}");
+                    AppendChat($"[File] {fileName}{integrityTag}");
                 }
             });
         }
@@ -313,7 +324,22 @@ namespace MassangerMaximka
         private void OnMetricsUpdated(ConnectionMetrics m)
         {
             MainThread.BeginInvokeOnMainThread(() =>
-                TechLog(LogCat.Metrics, $"RTT={m.RttMs:F1}ms loss={m.PacketLossPercent:F1}% throughput={m.ThroughputBytesPerSec / 1024:F1}KB/s retries={m.RetryCount} peer={m.PeerNodeId}"));
+            {
+                MetricRttLabel.Text = $"{m.RttMs:F0}ms";
+                MetricLossLabel.Text = $"{m.PacketLossPercent:F1}%";
+                MetricRetriesLabel.Text = m.RetryCount.ToString();
+                var quality = _metrics?.GetQuality(m.PeerNodeId) ?? ConnectionQuality.Unknown;
+                MetricQualityLabel.Text = quality.ToString();
+                MetricQualityLabel.TextColor = quality switch
+                {
+                    ConnectionQuality.Excellent => Color.FromArgb("#4CAF50"),
+                    ConnectionQuality.Good      => Color.FromArgb("#8BC34A"),
+                    ConnectionQuality.Fair      => Color.FromArgb("#FFC107"),
+                    ConnectionQuality.Poor      => Color.FromArgb("#F44336"),
+                    _                           => Color.FromArgb("#7A7570")
+                };
+                TechLog(LogCat.Metrics, $"RTT={m.RttMs:F1}ms loss={m.PacketLossPercent:F1}% throughput={m.ThroughputBytesPerSec / 1024:F1}KB/s retries={m.RetryCount} peer={m.PeerNodeId}");
+            });
         }
 
         // --- Peers ---
@@ -421,7 +447,8 @@ namespace MassangerMaximka
             TechLog(LogCat.Transport, $"SEND ChatPacket to={toNodeId} len={text.Length}");
             TechLog(LogCat.Encryption, $"Serializing envelope: JSON + length-prefix (4B header)");
             var msg = await _chat.SendMessageAsync(toNodeId, text);
-            AppendChat($"Me -> {toNodeId}: {text}");
+            var item = AppendChat($"Me -> {toNodeId}: {text}", status: "Sent");
+            _pendingItems[msg.MessageId] = item;
             TechLog(LogCat.Protocol, $"SENT id={msg.MessageId} status={msg.Status}");
         }
 
@@ -853,11 +880,13 @@ namespace MassangerMaximka
 
         // --- Logging ---
 
-        private void AppendChat(string line)
+        private ChatItem AppendChat(string line, string? status = null)
         {
-            _chatItems.Add(new ChatItem { Text = $"{DateTime.Now:HH:mm:ss} {line}" });
+            var item = new ChatItem { Text = $"{DateTime.Now:HH:mm:ss} {line}", Status = status };
+            _chatItems.Add(item);
             if (_chatItems.Count > 200) _chatItems.RemoveAt(0);
             ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
+            return item;
         }
 
         private void AppendVoiceMessage(string filePath, bool fromPeer)

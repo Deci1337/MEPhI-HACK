@@ -131,11 +131,16 @@
                     <DataTemplate x:DataType="local:ChatItem">
                         <Grid Padding="2,3">
                             <!-- Text message -->
-                            <Label Text="{Binding Text}"
-                                   IsVisible="{Binding IsText}"
-                                   LineBreakMode="WordWrap"
-                                   FontSize="{OnIdiom Phone=12, Default=13}"
-                                   TextColor="{StaticResource SeaShell}" />
+                            <Grid IsVisible="{Binding IsText}" ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                                <Label Grid.Column="0" Text="{Binding Text}"
+                                       LineBreakMode="WordWrap"
+                                       FontSize="{OnIdiom Phone=12, Default=13}"
+                                       TextColor="{StaticResource SeaShell}" />
+                                <Label Grid.Column="1" Text="{Binding Status}"
+                                       IsVisible="{Binding HasStatus}"
+                                       FontSize="9" TextColor="{StaticResource SeaShellMuted}"
+                                       VerticalOptions="End" />
+                            </Grid>
                             <!-- Voice message -->
                             <Grid IsVisible="{Binding IsVoice}"
                                   ColumnDefinitions="Auto,*" ColumnSpacing="8">
@@ -200,10 +205,34 @@
                         FontSize="9" Padding="6,2" CornerRadius="3" />
             </Grid>
 
-            <!-- Technical logs -->
-            <Grid Grid.Row="5" RowDefinitions="Auto,*" BackgroundColor="{StaticResource CoalPanel}">
+            <!-- Technical logs + Metrics bar -->
+            <Grid Grid.Row="5" RowDefinitions="Auto,Auto,*" BackgroundColor="{StaticResource CoalPanel}">
                 <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" />
-                <ScrollView Grid.Row="1" x:Name="TechLogScrollView" Padding="10,6">
+                <!-- Metrics bar -->
+                <Grid Grid.Row="1" Padding="10,5,10,5" ColumnDefinitions="*,*,*,*" ColumnSpacing="6"
+                      BackgroundColor="{StaticResource CoalPanel}">
+                    <StackLayout Grid.Column="0" Spacing="1">
+                        <Label Text="RTT" FontSize="8" TextColor="{StaticResource SeaShellMuted}" />
+                        <Label x:Name="MetricRttLabel" Text="--" FontSize="11"
+                               FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                    </StackLayout>
+                    <StackLayout Grid.Column="1" Spacing="1">
+                        <Label Text="LOSS" FontSize="8" TextColor="{StaticResource SeaShellMuted}" />
+                        <Label x:Name="MetricLossLabel" Text="--" FontSize="11"
+                               FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                    </StackLayout>
+                    <StackLayout Grid.Column="2" Spacing="1">
+                        <Label Text="QUALITY" FontSize="8" TextColor="{StaticResource SeaShellMuted}" />
+                        <Label x:Name="MetricQualityLabel" Text="--" FontSize="11"
+                               FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                    </StackLayout>
+                    <StackLayout Grid.Column="3" Spacing="1">
+                        <Label Text="RETRIES" FontSize="8" TextColor="{StaticResource SeaShellMuted}" />
+                        <Label x:Name="MetricRetriesLabel" Text="--" FontSize="11"
+                               FontAttributes="Bold" TextColor="{StaticResource SeaShell}" />
+                    </StackLayout>
+                </Grid>
+                <ScrollView Grid.Row="2" x:Name="TechLogScrollView" Padding="10,6">
                     <VerticalStackLayout x:Name="TechLogStack" Spacing="1" />
                 </ScrollView>
             </Grid>
