@@ -4,7 +4,7 @@
              xmlns:local="clr-namespace:MassangerMaximka"
              xmlns:conv="clr-namespace:MassangerMaximka.Converters"
              x:Class="MassangerMaximka.MainPage"
-             Title="PHOTON"
+             Title="ETHERнет"
              BackgroundColor="{StaticResource Coal}">
 
     <ContentPage.Resources>
@@ -53,10 +53,10 @@
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="8" />
                     </Border.StrokeShape>
-                    <Label Text="P" FontFamily="OpenSansSemibold" FontSize="20" TextColor="Black" HorizontalOptions="Center" VerticalOptions="Center" />
+                    <Label Text="E" FontFamily="OpenSansSemibold" FontSize="20" TextColor="Black" HorizontalOptions="Center" VerticalOptions="Center" />
                 </Border>
                 <StackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                    <Label Text="PHOTON" FontFamily="OpenSansSemibold" FontSize="16" FontAttributes="Bold"
+                    <Label Text="ETHERнет" FontFamily="OpenSansSemibold" FontSize="16" FontAttributes="Bold"
                            TextColor="White" CharacterSpacing="1.5" />
                     <Label x:Name="StatusLabel" Text="Starting..." FontSize="11"
                            TextColor="{StaticResource SeaShellMuted}" />
@@ -486,7 +486,7 @@
             <Grid x:Name="EmptyChatOverlay" Grid.Row="0" Grid.RowSpan="6" BackgroundColor="{StaticResource Coal}" IsVisible="True">
                 <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center" Spacing="20">
                     <Path Data="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" 
-                          Fill="White" HorizontalOptions="Center" Scale="2" Opacity="0.2" />
+                          Fill="White" HorizontalOptions="Center" WidthRequest="72" HeightRequest="72" Aspect="Uniform" Opacity="0.2" />
                     <Label Text="Select a chat to start messaging" TextColor="{StaticResource SeaShellMuted}" FontSize="14" HorizontalOptions="Center" />
                 </VerticalStackLayout>
             </Grid>
