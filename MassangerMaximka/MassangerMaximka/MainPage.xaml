@@ -15,16 +15,13 @@
             <conv:PeerStatusConverter x:Key="PeerStatusConverter" />
             
             <Style TargetType="Label">
-                <Setter Property="FontFamily" Value="IBMPlexMonoRegular" />
                 <Setter Property="TextColor" Value="White" />
                 <Setter Property="BackgroundColor" Value="Transparent" />
             </Style>
             <Style TargetType="Button">
-                <Setter Property="FontFamily" Value="IBMPlexMonoMedium" />
                 <Setter Property="TextColor" Value="White" />
             </Style>
             <Style TargetType="Entry">
-                <Setter Property="FontFamily" Value="IBMPlexMonoRegular" />
                 <Setter Property="TextColor" Value="White" />
             </Style>
         </ResourceDictionary>
@@ -77,34 +74,27 @@
             <CollectionView Grid.Row="2" x:Name="PeersList" SelectionMode="Single"
                             SelectionChanged="OnPeerSelected">
                 <CollectionView.ItemTemplate>
-                    <DataTemplate >
-                        <Grid Padding="16,6,16,6" MinimumHeightRequest="{OnIdiom Phone=56, Default=50}">
+                    <DataTemplate>
+                        <Grid Padding="8,3" MinimumHeightRequest="{OnIdiom Phone=56, Default=50}">
                             <Grid.GestureRecognizers>
                                 <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
                             </Grid.GestureRecognizers>
-                            <Border BackgroundColor="{StaticResource CoalSurface}"
-                                    StrokeThickness="1" Stroke="{StaticResource CoalBorder}" Padding="12,10">
-                                <Border.StrokeShape>
-                                    <RoundRectangle CornerRadius="8" />
-                                </Border.StrokeShape>
-                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                                    <!-- Avatar circle -->
-                                    <Border Grid.Column="0" WidthRequest="36" HeightRequest="36"
-                                            Background="{Binding ., Converter={StaticResource StringToAvatarBrushConverter}}"
-                                            StrokeThickness="1" Stroke="{StaticResource CoalBorder}" VerticalOptions="Center">
-                                        <Border.StrokeShape>
-                                            <RoundRectangle CornerRadius="6" />
-                                        </Border.StrokeShape>
-                                    </Border>
-                                    <!-- Peer title -->
-                                    <Label Grid.Column="1"
-                                           Text="{Binding}"
-                                           FontSize="13" FontAttributes="Bold"
-                                           TextColor="White"
-                                           LineBreakMode="TailTruncation"
-                                           VerticalOptions="Center" />
-                                </Grid>
-                            </Border>
+                            <Grid ColumnDefinitions="44,*" ColumnSpacing="10"
+                                  BackgroundColor="#141414" Padding="10,8">
+                                <Border Grid.Column="0" WidthRequest="36" HeightRequest="36"
+                                        Background="{Binding ., Converter={StaticResource StringToAvatarBrushConverter}}"
+                                        StrokeThickness="0" VerticalOptions="Center">
+                                    <Border.StrokeShape><RoundRectangle CornerRadius="6" /></Border.StrokeShape>
+                                </Border>
+                                <Label Grid.Column="1"
+                                       Text="{Binding .}"
+                                       FontFamily="OpenSansRegular"
+                                       FontSize="13" FontAttributes="Bold"
+                                       TextColor="White"
+                                       BackgroundColor="Transparent"
+                                       LineBreakMode="TailTruncation"
+                                       VerticalOptions="Center" />
+                            </Grid>
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
@@ -266,79 +256,64 @@
             <CollectionView Grid.Row="3" x:Name="ChatList" Margin="16,12,16,12">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="local:ChatItem">
-                        <Grid Padding="0,4">
+                        <StackLayout Padding="0,4">
                             <!-- Text bubble -->
-                            <Grid IsVisible="{Binding IsText}">
-                                <Border BackgroundColor="{Binding BubbleBg}"
-                                        StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        Stroke="{Binding BubbleStrokeColor}"
-                                        Padding="{Binding BubblePadding}"
-                                        MaximumWidthRequest="500"
-                                        HorizontalOptions="{Binding BubbleAlign}">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="{Binding BubbleRadius}" />
-                                    </Border.StrokeShape>
+                            <Grid IsVisible="{Binding IsText}" HorizontalOptions="{Binding BubbleAlign}">
+                                <Grid BackgroundColor="{Binding BubbleBg}"
+                                      MaximumWidthRequest="500"
+                                      Padding="{Binding BubblePadding}">
                                     <StackLayout Spacing="4">
                                         <Label Text="{Binding Text}"
+                                               FontFamily="OpenSansRegular"
                                                LineBreakMode="WordWrap"
-                                               FontSize="{OnIdiom Phone=14, Default=14}"
-                                               TextColor="White" />
+                                               FontSize="14"
+                                               TextColor="White"
+                                               BackgroundColor="Transparent" />
                                         <Label Text="{Binding Status}"
                                                IsVisible="{Binding HasStatus}"
-                                               FontSize="10" TextColor="{StaticResource SeaShellMuted}"
+                                               FontFamily="OpenSansRegular"
+                                               FontSize="10" TextColor="#888888"
+                                               BackgroundColor="Transparent"
                                                HorizontalOptions="End" />
                                     </StackLayout>
-                                </Border>
+                                </Grid>
                             </Grid>
                             <!-- Voice message -->
-                            <Grid IsVisible="{Binding IsVoice}">
-                                <Border BackgroundColor="{Binding BubbleBg}"
-                                        StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        Stroke="{Binding BubbleStrokeColor}"
-                                        Padding="12,10"
-                                        HorizontalOptions="{Binding BubbleAlign}">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="{Binding BubbleRadius}" />
-                                    </Border.StrokeShape>
+                            <Grid IsVisible="{Binding IsVoice}" HorizontalOptions="{Binding BubbleAlign}">
+                                <Grid BackgroundColor="{Binding BubbleBg}" Padding="12,10">
                                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                                         <Button Grid.Column="0" Text="▶"
                                                 BackgroundColor="Transparent"
                                                 BorderColor="White" BorderWidth="1"
                                                 TextColor="White"
+                                                FontFamily="OpenSansRegular"
                                                 FontSize="14" Padding="12,6" CornerRadius="6"
                                                 CommandParameter="{Binding VoicePath}"
                                                 Clicked="OnVoiceItemPlayClicked" />
                                         <Label Grid.Column="1" Text="{Binding Text}"
+                                               FontFamily="OpenSansRegular"
                                                FontSize="13" TextColor="White"
+                                               BackgroundColor="Transparent"
                                                VerticalOptions="Center" LineBreakMode="TailTruncation" />
                                     </Grid>
-                                </Border>
+                                </Grid>
                             </Grid>
                             <!-- Image message -->
-                            <Grid IsVisible="{Binding IsImage}">
-                                <Border BackgroundColor="{Binding BubbleBg}"
-                                        StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        Stroke="{Binding BubbleStrokeColor}"
-                                        Padding="8"
-                                        HorizontalOptions="{Binding BubbleAlign}">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="{Binding BubbleRadius}" />
-                                    </Border.StrokeShape>
+                            <Grid IsVisible="{Binding IsImage}" HorizontalOptions="{Binding BubbleAlign}">
+                                <Grid BackgroundColor="{Binding BubbleBg}" Padding="8">
                                     <StackLayout Spacing="8">
                                         <Label Text="{Binding Text}"
+                                               FontFamily="OpenSansRegular"
                                                FontSize="12" TextColor="White"
+                                               BackgroundColor="Transparent"
                                                LineBreakMode="TailTruncation" />
                                         <Image Source="{Binding ImageBytes, Converter={StaticResource ByteArrayToImageSourceConverter}}"
                                                HeightRequest="240" WidthRequest="240"
-                                               Aspect="AspectFill">
-                                            <Image.Clip>
-                                                <RoundRectangleGeometry CornerRadius="8" Rect="0,0,240,240" />
-                                            </Image.Clip>
-                                        </Image>
+                                               Aspect="AspectFill" />
                                     </StackLayout>
-                                </Border>
+                                </Grid>
                             </Grid>
-                        </Grid>
+                        </StackLayout>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
             </CollectionView>
