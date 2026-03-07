@@ -10,8 +10,8 @@ namespace MassangerMaximka;
 /// </summary>
 public sealed class VoiceCallManager : IDisposable
 {
-    private const int PcmChunkSize = 6400; // 200ms at 16kHz mono 16-bit
-    private const int AccumulateMs = 350;
+    private const int PcmChunkSize = 1280; // 40ms at 16kHz mono 16-bit — fits in single UDP packet (no IP fragmentation)
+    private const int AccumulateMs = 400;
     private static readonly int[] FallbackSampleRates = [16000, 44100, 48000];
 
     private readonly UdpVoiceTransport _transport;
@@ -232,14 +232,15 @@ public sealed class VoiceCallManager : IDisposable
             if (!_firstFrameSent)
             {
                 _firstFrameSent = true;
-                Log?.Invoke($"Voice TX: first frame to {_transport.RemoteEndPoint?.ToString() ?? "multicast"}, {chunk.Length}B");
+                var remote = _transport.RemoteEndPoint?.ToString() ?? "none";
+                var extraCount = _transport.ExtraEndPointCount;
+                Log?.Invoke($"Voice TX: first frame remote={remote} extras={extraCount} chunk={chunk.Length}B total={pcm.Length}B");
             }
 
             await _transport.SendFrameAsync(chunk);
             sent++;
 
-            // Pace sends: 5ms every 5 chunks to avoid UDP burst loss
-            if (sent % 5 == 0) await Task.Delay(5);
+            if (sent % 8 == 0) await Task.Delay(3);
         }
         Log?.Invoke($"PTT: sent {sent} chunks, {pcm.Length}B, ~{WavHelper.EstimateDurationMs(pcm.Length)}ms");
     }

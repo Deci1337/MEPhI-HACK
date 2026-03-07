@@ -675,7 +675,8 @@ namespace MassangerMaximka
                 }
             }
             _voice.SetExtraEndPoints(extras);
-            TechLog(LogCat.Network, $"Channel voice endpoints ready: {extras.Count}/{_channelMembers.Count - (_localNodeId != null ? 1 : 0)}");
+            var epList = string.Join(", ", extras.Select(e => e.ToString()));
+            TechLog(LogCat.Network, $"Channel voice EP: [{epList}] ({extras.Count}/{_channelMembers.Count - (_localNodeId != null ? 1 : 0)})");
         }
 
         // --- Peers ---

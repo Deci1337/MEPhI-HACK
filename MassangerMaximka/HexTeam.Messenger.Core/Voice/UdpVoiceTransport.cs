@@ -35,6 +35,8 @@ public sealed class UdpVoiceTransport : IDisposable
         lock (_extraEndPoints) { _extraEndPoints.Clear(); _extraEndPoints.AddRange(endpoints); }
     }
     public void ClearExtraEndPoints() { lock (_extraEndPoints) _extraEndPoints.Clear(); }
+    public int ExtraEndPointCount { get { lock (_extraEndPoints) return _extraEndPoints.Count; } }
+    public string ExtraEndPointsSummary { get { lock (_extraEndPoints) return string.Join(", ", _extraEndPoints); } }
 
     public event Action<byte[]>? FrameReceived;
 
@@ -102,10 +104,15 @@ public sealed class UdpVoiceTransport : IDisposable
             foreach (var ep in extras)
                 await _udpClient.SendAsync(packet, packet.Length, ep);
             Metrics.FramesSent++;
+            if (Metrics.FramesSent <= 2)
+                _logger.LogInformation("Voice TX #{N}: {Len}B remote={R} extras={E}",
+                    Metrics.FramesSent, packet.Length,
+                    _remoteEndPoint?.ToString() ?? "null",
+                    string.Join(",", extras.Select(e => e.ToString())));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to send voice frame");
+            _logger.LogWarning(ex, "Failed to send voice frame to remote={R}", _remoteEndPoint);
         }
     }
 
@@ -132,6 +139,9 @@ public sealed class UdpVoiceTransport : IDisposable
                 }
 
                 Metrics.FramesReceived++;
+                if (Metrics.FramesReceived <= 2)
+                    _logger.LogInformation("Voice RX #{N}: {Len}B from={EP}",
+                        Metrics.FramesReceived, result.Buffer.Length, result.RemoteEndPoint);
                 var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 var latency = now - frame.TimestampMs;
                 Metrics.UpdateLatency(latency);
