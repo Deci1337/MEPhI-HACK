@@ -49,6 +49,7 @@ namespace MassangerMaximka
         private readonly ObservableCollection<string> _peers = [];
         private readonly List<SavedPeer> _savedPeers = [];
         private readonly List<string> _chatLog = [];
+        private readonly Dictionary<string, System.Net.IPEndPoint> _peerEndpointMap = new();
         private int _techLogCount;
         private volatile bool _suppressTechLog;
 
@@ -158,10 +159,14 @@ namespace MassangerMaximka
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
+                var ep = _connections?.GetPeerEndPoint(nodeId);
+                if (ep != null)
+                    _peerEndpointMap[nodeId] = ep;
+
                 RefreshPeersList();
                 _autoConnectInFlight.Remove(nodeId);
                 AppendChat($"[Connected] {nodeId}");
-                TechLog(LogCat.Network, $"TCP connected: {nodeId}");
+                TechLog(LogCat.Network, $"TCP connected: {nodeId}" + (ep != null ? $" remote={ep}" : ""));
                 TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
             });
         }
@@ -557,6 +562,13 @@ namespace MassangerMaximka
                 _voiceRecordPath = path;
 
                 var fi = new FileInfo(path);
+                var bytes = File.ReadAllBytes(path);
+                var dataBytes = bytes.Skip(44).Take(20).ToArray();
+                var isAllZero = dataBytes.Length > 0 && dataBytes.All(b => b == 0);
+                TechLog(LogCat.System, $"Voice file: {bytes.Length}B, silence={isAllZero}");
+                if (isAllZero)
+                    TechLog(LogCat.System, "WARNING: recording is silent -- check emulator mic config (AVD -> Advanced -> Microphone)");
+
                 VoiceStatusLabel.Text = $"Voice: sending {fi.Length / 1024}KB...";
                 TechLog(LogCat.Transport, $"Voice message saved: {fi.Length} bytes");
 
@@ -624,7 +636,8 @@ namespace MassangerMaximka
 
             _callPeerNodeId = nodeId;
             _callPeerIp = ip;
-            _callPeerVoicePort = 45679;
+            var config = MauiProgram.AppInstance?.Services.GetService<NodeConfiguration>();
+            _callPeerVoicePort = config?.VoicePort ?? 45679;
             _isCallingOut = true;
 
             var localIp = GetLocalIpAddress();
@@ -1015,6 +1028,9 @@ namespace MassangerMaximka
 
         private IPAddress? ResolvePeerIpAddress(string nodeId)
         {
+            if (_peerEndpointMap.TryGetValue(nodeId, out var cachedEp))
+                return cachedEp.Address;
+
             if (_discovery?.Peers.TryGetValue(nodeId, out var peer) == true &&
                 IPAddress.TryParse(peer.IpAddress, out var discovered))
                 return discovered;

@@ -114,6 +114,13 @@ public sealed class PeerConnectionService : IDisposable
     public bool IsConnected(string peerNodeId) =>
         _connections.ContainsKey(peerNodeId);
 
+    public IPEndPoint? GetPeerEndPoint(string peerNodeId)
+    {
+        if (!_connections.TryGetValue(peerNodeId, out var conn))
+            return null;
+        return conn.Client.Client.RemoteEndPoint as IPEndPoint;
+    }
+
     private async Task AcceptClientsAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)

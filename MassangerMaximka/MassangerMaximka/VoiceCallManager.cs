@@ -20,7 +20,6 @@ public sealed class VoiceCallManager : IDisposable
     private CancellationTokenSource? _cts;
     private readonly ConcurrentQueue<byte[]> _playbackQueue = new();
     private volatile bool _active;
-    private int _chunkIndex;
 
     public bool IsActive => _active;
 
@@ -38,7 +37,6 @@ public sealed class VoiceCallManager : IDisposable
     {
         if (_active) return;
         _active = true;
-        _chunkIndex = 0;
         _cts = new CancellationTokenSource();
 
         _transport.Start(remoteEndPoint);
@@ -71,13 +69,22 @@ public sealed class VoiceCallManager : IDisposable
         {
             try
             {
-                var path = Path.Combine(_tempDir, $"c_{_chunkIndex++}.wav");
                 var recorder = _audioManager.CreateRecorder();
-                await recorder.StartAsync(path);
+                var options = new AudioRecorderOptions
+                {
+                    SampleRate = 16000,
+                    Channels = ChannelType.Mono,
+                    BitDepth = BitDepth.Pcm16bit,
+                    Encoding = Plugin.Maui.Audio.Encoding.Wav,
+                    ThrowIfNotSupported = false
+                };
+                await recorder.StartAsync(options);
                 await Task.Delay(ChunkMs, ct);
                 var source = await recorder.StopAsync();
 
-                var filePath = source is FileAudioSource fs ? fs.GetFilePath() : path;
+                string? filePath = null;
+                if (source is FileAudioSource fsa)
+                    filePath = fsa.GetFilePath();
                 if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) continue;
 
                 var wavBytes = await File.ReadAllBytesAsync(filePath, ct);
