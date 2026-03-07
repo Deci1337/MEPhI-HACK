@@ -52,21 +52,31 @@ public sealed class PeerConnectionService : IDisposable
         {
             var client = new TcpClient();
             await client.ConnectAsync(endPoint.Address, endPoint.Port, ct);
-            var conn = new PeerConnection(peerNodeId, client);
-            RegisterConnection(peerNodeId, conn);
+            var conn = new PeerConnection(peerNodeId, client, ConnectionDirection.Outgoing);
+            if (!TryActivateConnection(peerNodeId, conn))
+            {
+                conn.Dispose();
+                return true;
+            }
 
             await SendHelloAsync(conn.Stream, peerNodeId, ct);
 
             var peerHello = await EnvelopeSerializer.ReadFromStreamAsync(conn.Stream, ct);
-            if (peerHello?.Type != TransportPacketType.Hello || string.IsNullOrWhiteSpace(peerHello.SourceNodeId))
+            var parsedHello = ParseHello(peerHello);
+            if (peerHello?.Type != TransportPacketType.Hello || parsedHello == null)
                 throw new InvalidOperationException("Peer did not complete hello handshake.");
 
-            var actualPeerNodeId = peerHello.SourceNodeId;
+            var actualPeerNodeId = parsedHello.NodeId;
+            conn.AdvertisedListenPort = parsedHello.ListenPort;
             if (!string.Equals(actualPeerNodeId, peerNodeId, StringComparison.Ordinal))
             {
                 _connections.TryRemove(peerNodeId, out _);
                 conn.UpdatePeerNodeId(actualPeerNodeId);
-                RegisterConnection(actualPeerNodeId, conn);
+                if (!TryActivateConnection(actualPeerNodeId, conn))
+                {
+                    conn.Dispose();
+                    return true;
+                }
             }
 
             // ECDH key exchange — both sides derive the same AES-256 session key
@@ -160,7 +170,11 @@ public sealed class PeerConnectionService : IDisposable
     {
         if (!_connections.TryGetValue(peerNodeId, out var conn))
             return null;
-        return conn.Client.Client.RemoteEndPoint as IPEndPoint;
+        if (conn.Client.Client.RemoteEndPoint is not IPEndPoint remote)
+            return null;
+
+        var port = conn.AdvertisedListenPort > 0 ? conn.AdvertisedListenPort : remote.Port;
+        return new IPEndPoint(remote.Address, port);
     }
 
     public string? FindPeerNodeId(IPEndPoint endPoint)
@@ -199,15 +213,23 @@ public sealed class PeerConnectionService : IDisposable
         {
             var stream = client.GetStream();
             var hello = await EnvelopeSerializer.ReadFromStreamAsync(stream, ct);
-            if (hello == null || hello.Type != TransportPacketType.Hello)
+            var parsedHello = ParseHello(hello);
+            if (hello == null || hello.Type != TransportPacketType.Hello || parsedHello == null)
             {
                 client.Close();
                 return;
             }
 
-            var peerNodeId = hello.SourceNodeId;
-            var conn = new PeerConnection(peerNodeId, client);
-            RegisterConnection(peerNodeId, conn);
+            var peerNodeId = parsedHello.NodeId;
+            var conn = new PeerConnection(peerNodeId, client, ConnectionDirection.Incoming)
+            {
+                AdvertisedListenPort = parsedHello.ListenPort
+            };
+            if (!TryActivateConnection(peerNodeId, conn))
+            {
+                client.Close();
+                return;
+            }
 
             await SendHelloAsync(conn.Stream, peerNodeId, ct);
 
@@ -251,10 +273,28 @@ public sealed class PeerConnectionService : IDisposable
             Type = TransportPacketType.Hello,
             SourceNodeId = _nodeId,
             DestinationNodeId = peerNodeId,
-            Payload = System.Text.Encoding.UTF8.GetBytes(_nodeId)
+            Payload = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new HelloPayload(_nodeId, _listenPort))
         };
 
         return EnvelopeSerializer.WriteToStreamAsync(stream, hello, ct);
+    }
+
+    private static HelloPayload? ParseHello(TransportEnvelope? hello)
+    {
+        if (hello == null || hello.Type != TransportPacketType.Hello || string.IsNullOrWhiteSpace(hello.SourceNodeId))
+            return null;
+
+        try
+        {
+            var parsed = System.Text.Json.JsonSerializer.Deserialize<HelloPayload>(hello.Payload);
+            if (parsed != null && !string.IsNullOrWhiteSpace(parsed.NodeId))
+                return parsed;
+        }
+        catch
+        {
+        }
+
+        return new HelloPayload(hello.SourceNodeId, 0);
     }
 
     private async Task<byte[]?> ReceiveKeyExchangeAsync(PeerConnection conn, CancellationToken ct)
@@ -306,12 +346,54 @@ public sealed class PeerConnectionService : IDisposable
         }
     }
 
-    private void RegisterConnection(string peerNodeId, PeerConnection conn)
+    private bool TryActivateConnection(string peerNodeId, PeerConnection candidate)
     {
-        if (_connections.TryGetValue(peerNodeId, out var existing) && !ReferenceEquals(existing, conn))
-            existing.Dispose();
+        while (true)
+        {
+            if (!_connections.TryGetValue(peerNodeId, out var existing))
+                return _connections.TryAdd(peerNodeId, candidate);
 
-        _connections[peerNodeId] = conn;
+            if (ReferenceEquals(existing, candidate))
+                return true;
+
+            if (!ShouldReplaceConnection(existing, candidate))
+                return false;
+
+            if (_connections.TryUpdate(peerNodeId, candidate, existing))
+            {
+                existing.Dispose();
+                return true;
+            }
+        }
+    }
+
+    private bool ShouldReplaceConnection(PeerConnection existing, PeerConnection candidate)
+    {
+        if (!IsConnectionAlive(existing))
+            return true;
+
+        var preferOutgoing = string.Compare(_nodeId, candidate.PeerNodeId, StringComparison.Ordinal) < 0;
+        var preferredDirection = preferOutgoing ? ConnectionDirection.Outgoing : ConnectionDirection.Incoming;
+
+        if (existing.Direction == preferredDirection && candidate.Direction != preferredDirection)
+            return false;
+
+        if (candidate.Direction == preferredDirection && existing.Direction != preferredDirection)
+            return true;
+
+        return candidate.ConnectedAt < existing.ConnectedAt;
+    }
+
+    private static bool IsConnectionAlive(PeerConnection connection)
+    {
+        try
+        {
+            return connection.Client.Connected && connection.Client.Client is { IsBound: true };
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public void Dispose()
@@ -331,15 +413,18 @@ public sealed class PeerConnection : IDisposable
     public NetworkStream Stream { get; }
     public SemaphoreSlim WriteLock { get; } = new(1, 1);
     public DateTime ConnectedAt { get; } = DateTime.UtcNow;
+    public ConnectionDirection Direction { get; }
+    public int AdvertisedListenPort { get; set; }
 
     /// <summary>Per-peer AES-256-GCM encryptor derived from ECDH handshake. Null until key exchange completes.</summary>
     public TrafficEncryptor? Encryptor { get; set; }
 
-    public PeerConnection(string peerNodeId, TcpClient client)
+    public PeerConnection(string peerNodeId, TcpClient client, ConnectionDirection direction)
     {
         PeerNodeId = peerNodeId;
         Client = client;
         Stream = client.GetStream();
+        Direction = direction;
     }
 
     public void UpdatePeerNodeId(string peerNodeId) => PeerNodeId = peerNodeId;
@@ -351,3 +436,11 @@ public sealed class PeerConnection : IDisposable
         WriteLock.Dispose();
     }
 }
+
+public enum ConnectionDirection
+{
+    Incoming,
+    Outgoing
+}
+
+internal sealed record HelloPayload(string NodeId, int ListenPort);

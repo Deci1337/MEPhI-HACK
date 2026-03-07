@@ -204,8 +204,10 @@ namespace MassangerMaximka
                 _autoConnectInFlight.Remove(nodeId);
                 var name = ResolveDisplayName(nodeId);
                 AppendChat($"[Connected] {name}", toPeer: nodeId);
-                if (_selectedPeerNodeId == null && ep != null)
+                if (ep != null)
                     PromoteConnectedPeer(ep, nodeId);
+                else if (_activeChannelId == null)
+                    SwitchChat(nodeId);
                 TechLog(LogCat.Network, $"TCP connected: {name} ({nodeId})" + (ep != null ? $" remote={ep}" : ""));
                 TechLog(LogCat.Protocol, $"Hello packet sent/received for {nodeId}");
             });
@@ -396,7 +398,14 @@ namespace MassangerMaximka
                 if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
                     AppendToChannelChat($"{name}: [Photo] {msg.FileName}");
                 else
+                {
                     AppendChat($"{name}: [Photo] {msg.FileName}", toPeer: msg.FromNodeId, imageBytes: msg.Data);
+                    if (_activeChatPeer != msg.FromNodeId && _activeChannelId == null)
+                    {
+                        _unreadPeers.Add(msg.FromNodeId);
+                        RefreshPeersList();
+                    }
+                }
                 TechLog(LogCat.Transport, $"RECV image from={msg.FromNodeId} file={msg.FileName} bytes={msg.Data.Length}");
             });
         }
