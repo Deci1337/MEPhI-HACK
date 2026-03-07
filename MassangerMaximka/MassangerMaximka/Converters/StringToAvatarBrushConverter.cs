@@ -9,32 +9,46 @@ public class StringToAvatarBrushConverter : IValueConverter
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         var str = value as string ?? "";
-        var hash = str.GetHashCode();
-        var rnd = new Random(hash);
+        var rnd = new Random(str.GetHashCode());
 
-        // Generate base grayscale/muted colors for the B&W theme
-        var c1 = Color.FromRgb(rnd.Next(20, 100), rnd.Next(20, 100), rnd.Next(20, 100));
-        var c2 = Color.FromRgb(rnd.Next(100, 200), rnd.Next(100, 200), rnd.Next(100, 200));
-        var c3 = Color.FromRgb(rnd.Next(50, 150), rnd.Next(50, 150), rnd.Next(50, 150));
+        var bg = Color.FromRgb(10, 10, 10);
+        int numLines = rnd.Next(5, 10);
+        float lineWidth = 0.014f;
 
-        var stops = new GradientStopCollection();
-        
-        // Create sharp stripes
-        int numStripes = rnd.Next(3, 6);
-        float step = 1.0f / numStripes;
-        
-        for (int i = 0; i < numStripes; i++)
+        var positions = new List<float>();
+        for (int i = 0; i < numLines; i++)
+            positions.Add((float)(rnd.NextDouble() * 0.88 + 0.06));
+        positions.Sort();
+
+        var stops = new GradientStopCollection { new GradientStop(bg, 0f) };
+        float prev = 0f;
+
+        foreach (var pos in positions)
         {
-            var color = i % 3 == 0 ? c1 : (i % 3 == 1 ? c2 : c3);
-            stops.Add(new GradientStop(color, i * step));
-            stops.Add(new GradientStop(color, (i + 1) * step));
+            int brightness = rnd.Next(90, 255);
+            var line = Color.FromRgb(brightness, brightness, brightness);
+            float lo = Math.Max(prev, pos - lineWidth);
+            float hi = Math.Min(1f, pos + lineWidth);
+
+            if (lo > prev + 0.001f) stops.Add(new GradientStop(bg, lo));
+            stops.Add(new GradientStop(line, pos));
+            stops.Add(new GradientStop(bg, hi));
+            prev = hi;
         }
 
-        return new LinearGradientBrush(stops, new Point(0, 0), new Point(rnd.NextDouble(), rnd.NextDouble()));
+        if (prev < 1f) stops.Add(new GradientStop(bg, 1f));
+
+        // Sort stops by offset (required)
+        var sorted = stops.OrderBy(s => s.Offset).ToList();
+        var finalStops = new GradientStopCollection();
+        foreach (var s in sorted) finalStops.Add(s);
+
+        double angle = rnd.NextDouble() * Math.PI;
+        return new LinearGradientBrush(finalStops,
+            new Point(0, 0),
+            new Point(Math.Abs(Math.Cos(angle)), Math.Abs(Math.Sin(angle))));
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        throw new NotImplementedException();
-    }
+        => throw new NotImplementedException();
 }

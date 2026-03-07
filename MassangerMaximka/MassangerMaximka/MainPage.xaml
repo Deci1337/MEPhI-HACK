@@ -11,6 +11,8 @@
         <ResourceDictionary>
             <conv:ByteArrayToImageSourceConverter x:Key="ByteArrayToImageSourceConverter" />
             <conv:StringToAvatarBrushConverter x:Key="StringToAvatarBrushConverter" />
+            <conv:PeerNameConverter x:Key="PeerNameConverter" />
+            <conv:PeerStatusConverter x:Key="PeerStatusConverter" />
             
             <Style TargetType="Label">
                 <Setter Property="FontFamily" Value="JetBrains Mono, monospace" />
@@ -91,15 +93,20 @@
                                             Background="{Binding ., Converter={StaticResource StringToAvatarBrushConverter}}"
                                             StrokeThickness="1" Stroke="{StaticResource CoalBorder}" VerticalOptions="Center">
                                         <Border.StrokeShape>
-                                            <RoundRectangle CornerRadius="18" />
+                                            <RoundRectangle CornerRadius="6" />
                                         </Border.StrokeShape>
                                     </Border>
-                                    <!-- Name + status -->
-                                    <Label Grid.Column="1" Text="{Binding}"
-                                           FontSize="{OnIdiom Phone=13, Default=13}"
-                                           TextColor="White"
-                                           LineBreakMode="TailTruncation"
-                                           VerticalOptions="Center" />
+                                    <!-- Name + status (2-line) -->
+                                    <StackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
+                                        <Label Text="{Binding ., Converter={StaticResource PeerNameConverter}}"
+                                               FontSize="13" FontAttributes="Bold"
+                                               TextColor="White"
+                                               LineBreakMode="TailTruncation" />
+                                        <Label Text="{Binding ., Converter={StaticResource PeerStatusConverter}}"
+                                               FontSize="10"
+                                               TextColor="{StaticResource SeaShellMuted}"
+                                               LineBreakMode="TailTruncation" />
+                                    </StackLayout>
                                 </Grid>
                             </Border>
                         </Grid>
@@ -148,7 +155,7 @@
         <!-- ====== RIGHT: Chat panel ====== -->
         <Grid x:Name="ChatPanel" Grid.Column="1" Grid.Row="0" Grid.RowSpan="2"
               BackgroundColor="{StaticResource Coal}"
-              RowDefinitions="Auto,Auto,Auto,*,Auto,Auto,200" RowSpacing="0">
+              RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" RowSpacing="0">
 
             <!-- Chat header -->
             <Grid Grid.Row="0" Padding="16,12,12,12"
