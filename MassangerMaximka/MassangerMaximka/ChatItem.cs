@@ -6,6 +6,8 @@ namespace MassangerMaximka;
 public sealed class ChatItem : INotifyPropertyChanged
 {
     public string Text { get; init; } = "";
+    public string? SenderName { get; init; }
+    public string? TimeSent { get; init; }
     public string? VoicePath { get; init; }
     public byte[]? ImageBytes { get; init; }
     public bool IsFromMe { get; init; }
@@ -13,6 +15,8 @@ public sealed class ChatItem : INotifyPropertyChanged
     public bool IsVoice => VoicePath != null;
     public bool IsImage => ImageBytes != null;
     public bool IsText => VoicePath == null && ImageBytes == null;
+    public bool HasSenderName => !string.IsNullOrEmpty(SenderName);
+    public bool HasTimeSent => !string.IsNullOrEmpty(TimeSent);
 
     public LayoutOptions BubbleAlign => IsSystem ? LayoutOptions.Center : (IsFromMe ? LayoutOptions.End : LayoutOptions.Start);
     public Color BubbleBg => IsSystem ? Colors.Transparent : (IsFromMe ? Color.FromArgb("#000000") : Color.FromArgb("#2A2A2A"));

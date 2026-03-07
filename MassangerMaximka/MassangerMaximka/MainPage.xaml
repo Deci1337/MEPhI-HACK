@@ -283,19 +283,31 @@
                                     <Border.StrokeShape>
                                         <RoundRectangle CornerRadius="14" />
                                     </Border.StrokeShape>
-                                    <StackLayout Spacing="4">
+                                    <StackLayout Spacing="3">
+                                        <Label Text="{Binding SenderName}"
+                                               IsVisible="{Binding HasSenderName}"
+                                               FontFamily="OpenSansRegular"
+                                               FontSize="10" TextColor="#777777"
+                                               BackgroundColor="Transparent" />
                                         <Label Text="{Binding Text}"
                                                FontFamily="OpenSansRegular"
                                                LineBreakMode="WordWrap"
-                                               FontSize="14"
-                                               TextColor="White"
+                                               FontSize="14" TextColor="White"
                                                BackgroundColor="Transparent" />
-                                        <Label Text="{Binding Status}"
-                                               IsVisible="{Binding HasStatus}"
-                                               FontFamily="OpenSansRegular"
-                                               FontSize="10" TextColor="#888888"
-                                               BackgroundColor="Transparent"
-                                               HorizontalOptions="End" />
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <Label Grid.Column="0"
+                                                   Text="{Binding Status}"
+                                                   IsVisible="{Binding HasStatus}"
+                                                   FontFamily="OpenSansRegular"
+                                                   FontSize="10" TextColor="#666666"
+                                                   BackgroundColor="Transparent" />
+                                            <Label Grid.Column="1"
+                                                   Text="{Binding TimeSent}"
+                                                   IsVisible="{Binding HasTimeSent}"
+                                                   FontFamily="OpenSansRegular"
+                                                   FontSize="10" TextColor="#666666"
+                                                   BackgroundColor="Transparent" />
+                                        </Grid>
                                     </StackLayout>
                                 </Border>
                             </Grid>
@@ -308,21 +320,34 @@
                                     <Border.StrokeShape>
                                         <RoundRectangle CornerRadius="14" />
                                     </Border.StrokeShape>
-                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                                        <Button Grid.Column="0" Text="▶"
-                                                BackgroundColor="Transparent"
-                                                BorderColor="White" BorderWidth="1"
-                                                TextColor="White"
-                                                FontFamily="OpenSansRegular"
-                                                FontSize="14" Padding="12,6" CornerRadius="6"
-                                                CommandParameter="{Binding VoicePath}"
-                                                Clicked="OnVoiceItemPlayClicked" />
-                                        <Label Grid.Column="1" Text="{Binding Text}"
+                                    <StackLayout Spacing="4">
+                                        <Label Text="{Binding SenderName}"
+                                               IsVisible="{Binding HasSenderName}"
                                                FontFamily="OpenSansRegular"
-                                               FontSize="13" TextColor="White"
+                                               FontSize="10" TextColor="#777777"
+                                               BackgroundColor="Transparent" />
+                                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                                            <Button Grid.Column="0" Text="▶"
+                                                    BackgroundColor="Transparent"
+                                                    BorderColor="White" BorderWidth="1"
+                                                    TextColor="White"
+                                                    FontFamily="OpenSansRegular"
+                                                    FontSize="14" Padding="12,6" CornerRadius="6"
+                                                    CommandParameter="{Binding VoicePath}"
+                                                    Clicked="OnVoiceItemPlayClicked" />
+                                            <Label Grid.Column="1" Text="{Binding Text}"
+                                                   FontFamily="OpenSansRegular"
+                                                   FontSize="13" TextColor="White"
+                                                   BackgroundColor="Transparent"
+                                                   VerticalOptions="Center" LineBreakMode="TailTruncation" />
+                                        </Grid>
+                                        <Label Text="{Binding TimeSent}"
+                                               IsVisible="{Binding HasTimeSent}"
+                                               FontFamily="OpenSansRegular"
+                                               FontSize="10" TextColor="#666666"
                                                BackgroundColor="Transparent"
-                                               VerticalOptions="Center" LineBreakMode="TailTruncation" />
-                                    </Grid>
+                                               HorizontalOptions="End" />
+                                    </StackLayout>
                                 </Border>
                             </Grid>
                             <!-- Image message -->
@@ -334,15 +359,21 @@
                                     <Border.StrokeShape>
                                         <RoundRectangle CornerRadius="14" />
                                     </Border.StrokeShape>
-                                    <StackLayout Spacing="8">
-                                        <Label Text="{Binding Text}"
+                                    <StackLayout Spacing="6">
+                                        <Label Text="{Binding SenderName}"
+                                               IsVisible="{Binding HasSenderName}"
                                                FontFamily="OpenSansRegular"
-                                               FontSize="12" TextColor="White"
-                                               BackgroundColor="Transparent"
-                                               LineBreakMode="TailTruncation" />
+                                               FontSize="10" TextColor="#777777"
+                                               BackgroundColor="Transparent" />
                                         <Image Source="{Binding ImageBytes, Converter={StaticResource ByteArrayToImageSourceConverter}}"
                                                HeightRequest="240" WidthRequest="240"
                                                Aspect="AspectFill" />
+                                        <Label Text="{Binding TimeSent}"
+                                               IsVisible="{Binding HasTimeSent}"
+                                               FontFamily="OpenSansRegular"
+                                               FontSize="10" TextColor="#666666"
+                                               BackgroundColor="Transparent"
+                                               HorizontalOptions="End" />
                                     </StackLayout>
                                 </Border>
                             </Grid>

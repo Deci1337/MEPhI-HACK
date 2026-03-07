@@ -1538,9 +1538,24 @@ namespace MassangerMaximka
                         || line.StartsWith("[Connected]", StringComparison.Ordinal)
                         || line.StartsWith("[Call] Calling", StringComparison.Ordinal);
             var isSystem = line.StartsWith("[") && !isFromMe;
+
+            string? senderName = null;
+            string bodyText = line;
+            if (!isSystem)
+            {
+                var colonIdx = line.IndexOf(": ", StringComparison.Ordinal);
+                if (colonIdx > 0)
+                {
+                    senderName = line[..colonIdx];
+                    bodyText = line[(colonIdx + 2)..];
+                }
+            }
+
             var item = new ChatItem
             {
-                Text = isSystem ? line : $"{DateTime.Now:HH:mm} {line}",
+                Text = bodyText,
+                SenderName = senderName,
+                TimeSent = isSystem ? null : DateTime.Now.ToString("HH:mm"),
                 Status = status,
                 ImageBytes = imageBytes,
                 IsFromMe = isFromMe,
@@ -1556,10 +1571,11 @@ namespace MassangerMaximka
         private void AppendVoiceMessage(string filePath, bool fromPeer)
         {
             var name = Path.GetFileNameWithoutExtension(filePath);
-            var prefix = fromPeer ? "Received" : "Sent";
             _chatItems.Add(new ChatItem
             {
-                Text = $"{DateTime.Now:HH:mm} {prefix}: {name}",
+                Text = name,
+                SenderName = fromPeer ? "Voice message" : "Me",
+                TimeSent = DateTime.Now.ToString("HH:mm"),
                 VoicePath = filePath,
                 IsFromMe = !fromPeer
             });
