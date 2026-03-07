@@ -16,12 +16,16 @@
             
             <Style TargetType="Label">
                 <Setter Property="FontFamily" Value="IBMPlexMonoRegular" />
+                <Setter Property="TextColor" Value="White" />
+                <Setter Property="BackgroundColor" Value="Transparent" />
             </Style>
             <Style TargetType="Button">
                 <Setter Property="FontFamily" Value="IBMPlexMonoMedium" />
+                <Setter Property="TextColor" Value="White" />
             </Style>
             <Style TargetType="Entry">
                 <Setter Property="FontFamily" Value="IBMPlexMonoRegular" />
+                <Setter Property="TextColor" Value="White" />
             </Style>
         </ResourceDictionary>
     </ContentPage.Resources>
