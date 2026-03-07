@@ -17,6 +17,9 @@ namespace MassangerMaximka
                 {
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
                     fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
+                    fonts.AddFont("IBMPlexMono-Regular.ttf", "IBMPlexMonoRegular");
+                    fonts.AddFont("IBMPlexMono-Medium.ttf", "IBMPlexMonoMedium");
+                    fonts.AddFont("IBMPlexMono-Bold.ttf", "IBMPlexMonoBold");
                 });
 
 #if DEBUG

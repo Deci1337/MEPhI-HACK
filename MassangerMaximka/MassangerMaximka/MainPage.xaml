@@ -15,13 +15,13 @@
             <conv:PeerStatusConverter x:Key="PeerStatusConverter" />
             
             <Style TargetType="Label">
-                <Setter Property="FontFamily" Value="JetBrains Mono, monospace" />
+                <Setter Property="FontFamily" Value="IBMPlexMonoRegular" />
             </Style>
             <Style TargetType="Button">
-                <Setter Property="FontFamily" Value="JetBrains Mono, monospace" />
+                <Setter Property="FontFamily" Value="IBMPlexMonoMedium" />
             </Style>
             <Style TargetType="Entry">
-                <Setter Property="FontFamily" Value="JetBrains Mono, monospace" />
+                <Setter Property="FontFamily" Value="IBMPlexMonoRegular" />
             </Style>
         </ResourceDictionary>
     </ContentPage.Resources>
@@ -480,6 +480,15 @@
                         BackgroundColor="Transparent" BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
                         TextColor="White" FontAttributes="Bold"
                         FontSize="9" Padding="8,4" CornerRadius="4" />
+            </Grid>
+
+            <!-- Empty State Overlay -->
+            <Grid x:Name="EmptyChatOverlay" Grid.Row="0" Grid.RowSpan="6" BackgroundColor="{StaticResource Coal}" IsVisible="True">
+                <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center" Spacing="20">
+                    <Path Data="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" 
+                          Fill="White" HorizontalOptions="Center" Scale="2" Opacity="0.2" />
+                    <Label Text="Select a chat to start messaging" TextColor="{StaticResource SeaShellMuted}" FontSize="14" HorizontalOptions="Center" />
+                </VerticalStackLayout>
             </Grid>
         </Grid>
 

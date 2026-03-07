@@ -244,6 +244,7 @@ namespace MassangerMaximka
             _switchingChat = true;
             try
             {
+                EmptyChatOverlay.IsVisible = false;
                 _activeChatPeer = nodeId;
                 _activeChannelId = null;
                 _chatItems = GetOrCreatePeerChat(nodeId);
@@ -611,6 +612,7 @@ namespace MassangerMaximka
         {
             if (_channelChat == null) _channelChat = [];
             _activeChannelId = _channelService?.ActiveChannelId;
+            EmptyChatOverlay.IsVisible = false;
             _activeChatPeer = null;
             _chatItems = _channelChat;
             ChatList.ItemsSource = _channelChat;
@@ -1790,9 +1792,6 @@ namespace MassangerMaximka
             }
 
             DiagnosticsPanel.IsVisible = !narrow;
-            ChatPanel.RowDefinitions[6].Height = narrow
-                ? new GridLength(0)
-                : new GridLength(2, GridUnitType.Star);
         }
 
         private string? NormalizeNodeId(string? nodeId, string? endPointText = null)
