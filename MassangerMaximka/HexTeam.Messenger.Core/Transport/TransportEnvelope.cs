@@ -29,5 +29,6 @@ public enum TransportPacketType : byte
     Discovery = 40,
     Disconnect = 50,
     Inventory = 60,
-    MissingRequest = 61
+    MissingRequest = 61,
+    KeyExchange = 100
 }

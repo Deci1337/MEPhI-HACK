@@ -87,4 +87,65 @@ public class RetryPolicyTests
         var msg = store.GetBySession(sessionId).First();
         Assert.Equal(MessageDeliveryState.Delivered, msg.DeliveryState);
     }
+
+    [Fact]
+    public void Packet_marked_Failed_after_MaxRetries()
+    {
+        var transport = new FakeTransport(NodeB);
+        var store = new InMemoryMessageStore();
+        var sessionId = Guid.NewGuid();
+        var msgId = Guid.NewGuid();
+        store.Add(new ChatMessage { MessageId = msgId, SessionId = sessionId, SenderNodeId = NodeA });
+
+        var retry = new RetryPolicy(transport, store);
+        var envelope = MakeEnvelope(msgId);
+        retry.Track(envelope, NodeB);
+
+        // Tick MaxRetryCount+1 times to exhaust retries
+        for (int i = 0; i <= ProtocolConstants.MaxRetryCount; i++)
+            retry.ForceTick();
+
+        // Packet must be removed from pending (state = Unknown)
+        Assert.Equal(AckWaitState.Unknown, retry.GetState(envelope.PacketId));
+
+        var msg = store.GetBySession(sessionId).First();
+        Assert.Equal(MessageDeliveryState.Failed, msg.DeliveryState);
+    }
+
+    [Fact]
+    public void RetryExhausted_event_fires_after_exhaustion()
+    {
+        var transport = new FakeTransport(NodeB);
+        var store = new InMemoryMessageStore();
+
+        var retry = new RetryPolicy(transport, store);
+        var envelope = MakeEnvelope(Guid.NewGuid());
+        retry.Track(envelope, NodeB);
+
+        Guid? exhaustedId = null;
+        retry.RetryExhausted += id => exhaustedId = id;
+
+        for (int i = 0; i <= ProtocolConstants.MaxRetryCount; i++)
+            retry.ForceTick();
+
+        Assert.Equal(envelope.PacketId, exhaustedId);
+    }
+
+    [Fact]
+    public void Retry_resends_packet_before_exhaustion()
+    {
+        var transport = new FakeTransport(NodeB);
+        var store = new InMemoryMessageStore();
+
+        var retry = new RetryPolicy(transport, store);
+        var envelope = MakeEnvelope(Guid.NewGuid());
+        retry.Track(envelope, NodeB);
+
+        // First tick retries (RetryCount = 0 < MaxRetryCount = 3)
+        retry.ForceTick();
+
+        // Packet should have been resent
+        Assert.Single(transport.Sent);
+        Assert.Equal(envelope.PacketId, transport.Sent[0].Envelope.PacketId);
+    }
 }

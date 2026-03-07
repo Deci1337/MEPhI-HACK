@@ -221,4 +221,18 @@ public class PacketRateLimiterTests
         Assert.True(fresh.Allowed);
         Assert.Equal(0, fresh.TotalViolations);
     }
+
+    [Fact]
+    public void Blocks_peer_after_100_packets_in_10s()
+    {
+        var limiter = new PacketRateLimiter(maxPacketsPerWindow: 100, windowSeconds: 10);
+        var peer = Guid.NewGuid();
+
+        for (int i = 0; i < 100; i++)
+            Assert.True(limiter.Check(peer).Allowed, $"Packet {i + 1} must be allowed");
+
+        var overflow = limiter.Check(peer);
+        Assert.False(overflow.Allowed);
+        Assert.Equal(1, overflow.TotalViolations);
+    }
 }

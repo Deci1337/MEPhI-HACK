@@ -36,6 +36,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<E2EEncryptionService>();
         services.AddSingleton<PacketRateLimiter>();
 
+        // PeerConnectionService must be created before TransportAdapter
+        services.AddSingleton(sp =>
+            new PeerConnectionService(config.NodeId, config.TcpPort,
+                sp.GetRequiredService<KeyExchangeService>(),
+                sp.GetRequiredService<ILogger<PeerConnectionService>>()));
+
+        // TransportAdapter bridges ITransport (Core Envelope) to PeerConnectionService (TransportEnvelope)
+        services.AddSingleton<ITransport>(sp =>
+            new TransportAdapter(sp.GetRequiredService<PeerConnectionService>()));
+
         services.AddSingleton(sp =>
             new RelayService(
                 sp.GetRequiredService<ISeenPacketStore>(),
@@ -54,22 +64,46 @@ public static class ServiceCollectionExtensions
                 nodeGuid));
 
         services.AddSingleton(sp =>
-            new PacketRouter(
+        {
+            var router = new PacketRouter(
                 sp.GetRequiredService<RelayService>(),
                 sp.GetRequiredService<RetryPolicy>(),
                 sp.GetRequiredService<MessageSyncService>(),
                 sp.GetRequiredService<IMessageStore>(),
                 sp.GetRequiredService<HandshakeVerifier>(),
                 sp.GetRequiredService<ILogger<PacketRouter>>(),
-                nodeGuid));
+                nodeGuid);
+
+            // Task 2: route incoming Core Envelopes through PacketRouter
+            sp.GetRequiredService<ITransport>().PacketReceived +=
+                (envelope, fromNodeId) => _ = router.HandleIncomingAsync(envelope, fromNodeId);
+
+            // Task 2: bridge PacketRouter chat events back to TcpChatTransport for UI consumers
+            router.ChatMessageReceived += msg =>
+            {
+                var transport = sp.GetRequiredService<TcpChatTransport>();
+                transport.RaiseMessageReceived(new TransportChatMessage(
+                    msg.MessageId.ToString("N")[..16],
+                    msg.SenderNodeId.ToString(),
+                    nodeGuid.ToString(),
+                    msg.Text,
+                    msg.SentAtUtc.ToUnixTimeMilliseconds()));
+            };
+
+            // Task 3: send inventory to peers that reconnect with known session history
+            sp.GetRequiredService<PeerConnectionService>().PeerConnected += peerNodeId =>
+            {
+                var sessionId = sp.GetRequiredService<IMessageStore>().GetSessionIdForPeer(peerNodeId);
+                if (sessionId.HasValue && Guid.TryParse(peerNodeId, out var peerGuid))
+                    _ = router.OnPeerReconnectedAsync(peerGuid, sessionId.Value);
+            };
+
+            return router;
+        });
 
         services.AddSingleton(sp =>
             new UdpDiscoveryService(config.NodeId, config.DisplayName, config.TcpPort, config.DiscoveryPort, config.IsRelay,
                 sp.GetRequiredService<ILogger<UdpDiscoveryService>>()));
-
-        services.AddSingleton(sp =>
-            new PeerConnectionService(config.NodeId, config.TcpPort,
-                sp.GetRequiredService<ILogger<PeerConnectionService>>()));
 
         services.AddSingleton(sp =>
             new TcpChatTransport(config.NodeId,

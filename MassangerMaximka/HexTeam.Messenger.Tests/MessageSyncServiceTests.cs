@@ -107,4 +107,31 @@ public class MessageSyncServiceTests
         Assert.Empty(missing);
         Assert.Single(store.GetBySession(sessionId));
     }
+
+    [Fact]
+    public async Task ResendMessages_only_sends_known_IDs()
+    {
+        var store = new InMemoryMessageStore();
+        var sessionId = Guid.NewGuid();
+        var knownId = Guid.NewGuid();
+        var unknownId = Guid.NewGuid();
+
+        store.Add(new ChatMessage
+        {
+            MessageId = knownId,
+            SessionId = sessionId,
+            SenderNodeId = NodeA,
+            Text = "stored"
+        });
+
+        var transport = new FakeTransport(NodeB);
+        var sync = new MessageSyncService(store, transport, NodeA);
+
+        await sync.ResendMessagesAsync(NodeB, [knownId, unknownId]);
+
+        // Only the known message should be resent; unknown ID is silently skipped
+        Assert.Single(transport.Sent);
+        Assert.Equal(PacketType.ChatEnvelope, transport.Sent[0].Envelope.PacketType);
+        Assert.Equal(NodeB, transport.Sent[0].Target);
+    }
 }

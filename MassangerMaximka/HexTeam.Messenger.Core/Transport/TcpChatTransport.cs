@@ -119,6 +119,13 @@ public sealed class TcpChatTransport
         }
     }
 
+    /// <summary>
+    /// Allows PacketRouter to inject a CoreMessage received through the relay pipeline
+    /// into the transport-level MessageReceived stream so UI subscribers observe it.
+    /// </summary>
+    public void RaiseMessageReceived(TransportChatMessage msg) =>
+        MessageReceived?.Invoke(msg);
+
     private async Task SendAckAsync(string toPeerNodeId, string ackedPacketId)
     {
         var ack = new TransportEnvelope

@@ -33,4 +33,10 @@ public sealed class InMemoryMessageStore : IMessageStore
         if (_messages.TryGetValue(messageId, out var msg))
             msg.DeliveryState = state;
     }
+
+    public Guid? GetSessionIdForPeer(string nodeId) =>
+        _messages.Values
+            .Where(m => m.SenderNodeId.ToString() == nodeId)
+            .Select(m => (Guid?)m.SessionId)
+            .FirstOrDefault();
 }
