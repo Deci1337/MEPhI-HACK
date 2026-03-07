@@ -1543,8 +1543,9 @@ namespace MassangerMaximka
             var prefix = fromPeer ? "Received" : "Sent";
             _chatItems.Add(new ChatItem
             {
-                Text = $"{DateTime.Now:HH:mm:ss} {prefix}: {name}",
-                VoicePath = filePath
+                Text = $"{DateTime.Now:HH:mm} {prefix}: {name}",
+                VoicePath = filePath,
+                IsFromMe = !fromPeer
             });
             ChatList.ScrollTo(_chatItems[^1], ScrollToPosition.End, animate: false);
         }
