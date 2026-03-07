@@ -7,7 +7,7 @@ namespace HexTeam.Messenger.Core.Transport;
 
 public sealed class TcpChatTransport
 {
-    private const int MaxImageSizeBytes = 2 * 1024 * 1024;
+    private const int MaxImageSizeBytes = 20 * 1024 * 1024;
     private readonly string _nodeId;
     private readonly PeerConnectionService _connectionService;
     private readonly ILogger<TcpChatTransport> _logger;

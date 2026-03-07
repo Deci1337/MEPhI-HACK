@@ -61,9 +61,23 @@ public sealed class UdpVoiceTransport : IDisposable
             _actualPort, remoteEndPoint);
     }
 
+    /// <summary>Start receiving without a primary remote (for channel calls using extraEndPoints only).</summary>
+    public void StartListening()
+    {
+        if (IsActive) Stop();
+        _remoteEndPoint = null;
+        _cts = new CancellationTokenSource();
+        _sequenceNumber = 0;
+        if (_udpClient?.Client == null || !_udpClient.Client.IsBound)
+            _udpClient = BindUdpClient(_listenPort);
+        IsActive = true;
+        _ = ReceiveLoopAsync(_cts.Token);
+        _logger.LogInformation("Voice transport listening (channel mode) on :{Port}", _actualPort);
+    }
+
     public async Task SendFrameAsync(byte[] pcmData)
     {
-        if (_udpClient == null || _remoteEndPoint == null || !IsActive) return;
+        if (_udpClient == null || !IsActive) return;
 
         var frame = new VoiceFrame
         {
@@ -75,7 +89,8 @@ public sealed class UdpVoiceTransport : IDisposable
         var packet = SerializeFrame(frame);
         try
         {
-            await _udpClient.SendAsync(packet, packet.Length, _remoteEndPoint);
+            if (_remoteEndPoint != null)
+                await _udpClient.SendAsync(packet, packet.Length, _remoteEndPoint);
             List<IPEndPoint> extras;
             lock (_extraEndPoints) extras = [.._extraEndPoints];
             foreach (var ep in extras)

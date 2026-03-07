@@ -46,6 +46,17 @@ public sealed class VoiceCallManager : IDisposable
         Log?.Invoke("Walkie-talkie ready. Hold Talk to speak.");
     }
 
+    /// <summary>Start playback loop only (channel mode where transport is already listening).</summary>
+    public void StartChannelMode()
+    {
+        if (_active) return;
+        _active = true;
+        _cts = new CancellationTokenSource();
+        _transport.FrameReceived += OnFrameReceived;
+        _ = Task.Run(() => PlaybackLoopAsync(_cts.Token), _cts.Token);
+        Log?.Invoke("Channel walkie-talkie ready. Hold Talk to speak.");
+    }
+
     public async Task StartTalkingAsync()
     {
         if (!_active || _talking) return;

@@ -263,7 +263,16 @@ namespace MassangerMaximka
                     var callerIp = _peerEndpointMap.TryGetValue(msg.FromNodeId, out var tcpEp)
                         ? tcpEp.Address
                         : (IPAddress.TryParse(ipStr, out var parsed) ? parsed : null);
-                    if (!_isInCall && !_isCallingOut && callerIp != null)
+                    if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
+                    {
+                        if (callerIp != null)
+                        {
+                            _peerEndpointMap[msg.FromNodeId] = new System.Net.IPEndPoint(callerIp, voicePort);
+                            SetChannelVoiceEndPoints();
+                            if (!_isInCall) _ = StartChannelCallAsync();
+                        }
+                    }
+                    else if (!_isInCall && !_isCallingOut && callerIp != null)
                     {
                         _incomingCallFromNodeId = msg.FromNodeId;
                         _incomingCallerIp = callerIp;
@@ -368,10 +377,11 @@ namespace MassangerMaximka
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
-                AppendChat(
-                    $"{ResolveDisplayName(msg.FromNodeId)}: [Photo] {msg.FileName}",
-                    toPeer: msg.FromNodeId,
-                    imageBytes: msg.Data);
+                var name = ResolveDisplayName(msg.FromNodeId);
+                if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
+                    AppendToChannelChat($"{name}: [Photo] {msg.FileName}");
+                else
+                    AppendChat($"{name}: [Photo] {msg.FileName}", toPeer: msg.FromNodeId, imageBytes: msg.Data);
                 TechLog(LogCat.Transport, $"RECV image from={msg.FromNodeId} file={msg.FileName} bytes={msg.Data.Length}");
             });
         }
@@ -531,6 +541,7 @@ namespace MassangerMaximka
                 if (!string.IsNullOrEmpty(packet.ChannelName)) _activeChannelName = packet.ChannelName;
                 ChannelInfoLabel.Text = $"Channel: {packet.ChannelId} | Members: {packet.MemberNodeIds.Count}";
                 SetChannelVoiceEndPoints();
+                RefreshPeersList();
                 TechLog(LogCat.Protocol, $"Channel members updated: {packet.MemberNodeIds.Count}");
             });
         }
@@ -540,10 +551,12 @@ namespace MassangerMaximka
             if (_channelChat == null) _channelChat = [];
             _activeChannelId = _channelService?.ActiveChannelId;
             _activeChatPeer = null;
+            _chatItems = _channelChat;
             ChatList.ItemsSource = _channelChat;
             SelectedPeerLabel.Text = $"#{_activeChannelName ?? "channel"}";
             ChannelBar.IsVisible = true;
             ChannelInfoLabel.Text = $"Channel: {_channelService?.ActiveChannelId} | Members: {_channelMembers.Count}";
+            RefreshPeersList();
         }
 
         private void AppendToChannelChat(string text)
@@ -592,6 +605,8 @@ namespace MassangerMaximka
         private void RefreshPeersList()
         {
             _peers.Clear();
+            if (_activeChannelId != null)
+                _peers.Add($"#CH {_activeChannelName ?? "channel"} | {_channelMembers.Count} members");
             var seen = new HashSet<string>();
             var seenEndpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (_discovery != null)
@@ -625,11 +640,25 @@ namespace MassangerMaximka
         private void OnPeerSelected(object? sender, SelectionChangedEventArgs e)
         {
             if (e.CurrentSelection.FirstOrDefault() is not string s) return;
+
+            if (s.StartsWith("#CH ", StringComparison.Ordinal))
+            {
+                SwitchToChannel();
+                return;
+            }
+
             _selectedPeerNodeId = ExtractNodeId(s);
             var savedEndPoint = ExtractEndPoint(s);
             if (!string.IsNullOrWhiteSpace(savedEndPoint))
                 ManualIpEntry.Text = savedEndPoint;
             var name = _selectedPeerNodeId != null ? ResolveDisplayName(_selectedPeerNodeId) : "(none)";
+
+            if (_activeChannelId != null)
+            {
+                SelectedPeerLabel.Text = name;
+                return;
+            }
+
             SelectedPeerLabel.Text = name;
             if (_selectedPeerNodeId != null)
                 SwitchChat(_selectedPeerNodeId);
@@ -785,19 +814,24 @@ namespace MassangerMaximka
                 using var ms = new MemoryStream();
                 await stream.CopyToAsync(ms);
                 var bytes = ms.ToArray();
-                if (bytes.Length > 2 * 1024 * 1024)
+                if (bytes.Length > 20 * 1024 * 1024)
                 {
-                    AppendChat("[Error] Photo is larger than 2 MB");
-                    TechLog(LogCat.System, $"Photo rejected: {bytes.Length} bytes exceeds 2MB");
+                    AppendChat("[Error] Photo is larger than 20 MB");
+                    TechLog(LogCat.System, $"Photo rejected: {bytes.Length} bytes exceeds 20MB");
                     return;
                 }
 
-                await _chat.SendImageAsync(toNodeId, result.FileName, bytes);
-                AppendChat(
-                    $"Me: [Photo] {result.FileName}",
-                    status: "Sent",
-                    toPeer: toNodeId,
-                    imageBytes: bytes);
+                if (_activeChannelId != null && _channelMembers.Count > 0)
+                {
+                    foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                        await _chat.SendImageAsync(m, result.FileName, bytes);
+                    AppendToChannelChat($"Me: [Photo] {result.FileName}");
+                }
+                else
+                {
+                    await _chat.SendImageAsync(toNodeId, result.FileName, bytes);
+                    AppendChat($"Me: [Photo] {result.FileName}", status: "Sent", toPeer: toNodeId, imageBytes: bytes);
+                }
                 TechLog(LogCat.Transport, $"SEND image to={toNodeId} file={result.FileName} bytes={bytes.Length}");
             }
             catch (Exception ex)
@@ -963,9 +997,23 @@ namespace MassangerMaximka
         {
             if (_isInCall || _isCallingOut)
             {
-                _ = SendCallSignalAsync(_callPeerNodeId, CallEnd);
+                if (_activeChannelId != null)
+                {
+                    foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                        _ = SendCallSignalAsync(m, CallEnd);
+                }
+                else
+                {
+                    _ = SendCallSignalAsync(_callPeerNodeId, CallEnd);
+                }
                 if (_isInCall) EndCall();
                 else ResetCallingState();
+                return;
+            }
+
+            if (_activeChannelId != null)
+            {
+                await StartChannelCallAsync();
                 return;
             }
 
@@ -998,6 +1046,52 @@ namespace MassangerMaximka
             VoiceStatusLabel.Text = $"Calling {nodeId}...";
             AppendChat($"[Call] Calling {nodeId}...");
             TechLog(LogCat.Network, $"CALL_REQUEST sent to {nodeId} ip={localIp} voice_port={voicePort}");
+        }
+
+        private async Task StartChannelCallAsync()
+        {
+            if (_voice == null || _audioManager == null)
+            {
+                AppendToChannelChat("[Error] Voice transport not available");
+                return;
+            }
+            if (!await EnsureMicPermissionAsync())
+            {
+                AppendToChannelChat("[Error] Mic permission denied");
+                return;
+            }
+
+            SetChannelVoiceEndPoints();
+            _isInCall = true;
+            try
+            {
+                _voiceCallManager?.Dispose();
+                _voiceCallManager = new VoiceCallManager(_voice, _audioManager);
+                _voiceCallManager.Log += msg =>
+                    MainThread.BeginInvokeOnMainThread(() => TechLog(LogCat.System, msg));
+                _voice.StartListening();
+                _voiceCallManager.StartChannelMode();
+            }
+            catch (Exception ex)
+            {
+                AppendToChannelChat($"[Error] Channel call failed: {ex.Message}");
+                _isInCall = false;
+                return;
+            }
+
+            var voicePort = _voice.ListenPort;
+            var localIp = GetLocalIpAddress();
+            foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                _ = SendCallSignalAsync(m, $"{CallRequestPrefix}{localIp}:{voicePort}");
+
+            RecordBtn.IsVisible = false;
+            StopSendBtn.IsVisible = false;
+            PttBtn.IsVisible = true;
+            CallBtn.Text = "Hang Up";
+            CallBtn.BackgroundColor = Color.FromArgb("#B71C1C");
+            VoiceStatusLabel.Text = "Channel call - Hold Talk to speak";
+            AppendToChannelChat($"[Call] Channel call started");
+            TechLog(LogCat.Network, $"Channel call started, voice_port={voicePort}, members={_channelMembers.Count}");
         }
 
         private async Task StartCallAsync(string nodeId, IPAddress ip, int voicePort)
@@ -1047,6 +1141,8 @@ namespace MassangerMaximka
         {
             _voiceCallManager?.Dispose();
             _voiceCallManager = null;
+            _voice?.Stop();
+            _voice?.ClearExtraEndPoints();
 
             _isInCall = false;
             _callPeerNodeId = null;
@@ -1057,7 +1153,10 @@ namespace MassangerMaximka
             CallBtn.Text = "Call";
             CallBtn.BackgroundColor = Color.FromArgb("#2E7D32");
             VoiceStatusLabel.Text = "Voice: idle";
-            AppendChat("[Call] Call ended");
+            if (_activeChannelId != null)
+                AppendToChannelChat("[Call] Channel call ended");
+            else
+                AppendChat("[Call] Call ended");
             TechLog(LogCat.Network, "Voice call ended");
         }
 

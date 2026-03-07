@@ -72,13 +72,12 @@ public sealed class ChannelService
 
         if (!channel.MemberNodeIds.Contains(_localNodeId))
             channel.MemberNodeIds.Add(_localNodeId);
+        if (!channel.MemberNodeIds.Contains(fromNodeId))
+            channel.MemberNodeIds.Add(fromNodeId);
         ActiveChannelId = channelId;
 
-        await _chatTransport.SendPacketAsync(
-            fromNodeId,
-            TransportPacketType.ChannelJoin,
-            JsonSerializer.SerializeToUtf8Bytes(channel),
-            ct);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(channel);
+        await _chatTransport.SendPacketAsync(fromNodeId, TransportPacketType.ChannelJoin, payload, ct);
     }
 
     public async Task BroadcastMembers(CancellationToken ct = default)
@@ -144,8 +143,11 @@ public sealed class ChannelService
                     HandleInvite(packet);
                     break;
                 case TransportPacketType.ChannelJoin:
+                    if (!packet.MemberNodeIds.Contains(fromNodeId))
+                        packet.MemberNodeIds.Add(fromNodeId);
                     AddOrUpdateMembers(packet);
                     MembersUpdated?.Invoke(Clone(packet));
+                    _ = BroadcastMembers();
                     break;
                 case TransportPacketType.ChannelLeave:
                     if (_channels.TryGetValue(packet.ChannelId, out var channel))
