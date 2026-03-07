@@ -94,33 +94,39 @@
 
             <!-- Chat header: selected peer + call controls -->
             <Grid Grid.Row="0" Padding="12,9,8,9"
-                  ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+                  ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto"
                   ColumnSpacing="6"
                   BackgroundColor="{StaticResource CoalPanel}">
-                <StackLayout Grid.Column="0" Spacing="1" VerticalOptions="Center">
+                <Button Grid.Column="0" x:Name="BackToPeersBtn" Text="←"
+                        Clicked="OnBackToPeersClicked"
+                        IsVisible="False"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShell}"
+                        FontSize="16" Padding="10,4" CornerRadius="3" />
+                <StackLayout Grid.Column="1" Spacing="1" VerticalOptions="Center">
                     <Label x:Name="SelectedPeerLabel" Text="Select a peer"
                            FontSize="{OnIdiom Phone=12, Default=14}" FontAttributes="Bold"
                            TextColor="{StaticResource SeaShell}" />
                     <Label x:Name="VoiceStatusLabel" Text="Voice: idle"
                            FontSize="9" TextColor="{StaticResource SeaShellMuted}" />
                 </StackLayout>
-                <Button Grid.Column="1" x:Name="RecordBtn" Text="REC"
+                <Button Grid.Column="2" x:Name="RecordBtn" Text="REC"
                         Clicked="OnRecordVoiceClicked"
                         BackgroundColor="{StaticResource DangerRed}"
                         TextColor="{StaticResource SeaShell}"
                         FontSize="10" Padding="8,4" CornerRadius="3" />
-                <Button Grid.Column="2" x:Name="StopSendBtn" Text="STOP"
+                <Button Grid.Column="3" x:Name="StopSendBtn" Text="STOP"
                         Clicked="OnStopSendVoiceClicked"
                         BackgroundColor="{StaticResource CoalSurface}"
                         TextColor="{StaticResource SeaShell}"
                         FontSize="10" Padding="8,4" CornerRadius="3" />
-                <Button Grid.Column="3" x:Name="PttBtn" Text="Talk"
+                <Button Grid.Column="4" x:Name="PttBtn" Text="Talk"
                         IsVisible="False"
                         Pressed="OnPttPressed" Released="OnPttReleased"
                         BackgroundColor="{StaticResource AccentBlue}"
                         TextColor="{StaticResource SeaShell}"
                         FontSize="10" Padding="14,4" CornerRadius="3" />
-                <Button Grid.Column="4" x:Name="CallBtn" Text="Call"
+                <Button Grid.Column="5" x:Name="CallBtn" Text="Call"
                         Clicked="OnCallButtonClicked"
                         BackgroundColor="{StaticResource SuccessGreen}"
                         TextColor="{StaticResource SeaShell}"
