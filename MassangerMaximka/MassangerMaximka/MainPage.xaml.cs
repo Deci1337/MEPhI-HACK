@@ -1498,6 +1498,20 @@ namespace MassangerMaximka
             TechLog(LogCat.System, $"Logs copied to clipboard ({_techLogCount} entries)");
         }
 
+        private bool _logsPanelVisible = true;
+
+        private void OnToggleLogsPanelClicked(object? sender, EventArgs e)
+        {
+            _logsPanelVisible = !_logsPanelVisible;
+            DiagnosticsPanel.IsVisible = _logsPanelVisible;
+            RootLayout.ColumnDefinitions[2].Width = _logsPanelVisible
+                ? new GridLength(320)
+                : new GridLength(0);
+            ShowLogsBtn.IsVisible = !_logsPanelVisible;
+            if (_logsPanelVisible)
+                ToggleLogsBtn.Text = "×";
+        }
+
         private void OnClearLogsClicked(object? sender, EventArgs e)
         {
             _suppressTechLog = true;

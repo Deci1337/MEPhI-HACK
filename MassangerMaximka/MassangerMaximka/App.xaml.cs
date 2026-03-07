@@ -12,7 +12,7 @@ namespace MassangerMaximka
         {
             var window = new Window(new AppShell())
             {
-                Title = "Hex P2P Test"
+                Title = "Ether.нет - не нужен интернет"
             };
             
             #if MACCATALYST

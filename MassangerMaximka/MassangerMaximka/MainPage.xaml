@@ -145,7 +145,7 @@
 
             <!-- Chat header -->
             <Grid Grid.Row="0" Padding="16,12,12,12"
-                  ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto"
+                  ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="10"
                   BackgroundColor="{StaticResource CoalPanel}">
                 <!-- Mobile back button -->
@@ -199,6 +199,16 @@
                           Fill="White" HorizontalOptions="Center" VerticalOptions="Center" Scale="0.8" />
                     <Button BackgroundColor="Transparent" Clicked="OnCallButtonClicked" />
                 </Grid>
+                <!-- Toggle logs (Desktop only) -->
+                <Button Grid.Column="6" x:Name="ShowLogsBtn"
+                        Text="≡" FontSize="16"
+                        Clicked="OnToggleLogsPanelClicked"
+                        BackgroundColor="Transparent"
+                        BorderColor="{StaticResource CoalBorder}" BorderWidth="1"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        WidthRequest="44" HeightRequest="40"
+                        Padding="0" CornerRadius="6"
+                        IsVisible="{OnIdiom Phone=False, Default=False}" />
             </Grid>
             <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
 
@@ -469,8 +479,19 @@
               RowDefinitions="Auto,Auto,*" RowSpacing="0"
               IsVisible="{OnIdiom Phone=False, Default=True}">
             <BoxView Grid.Row="0" WidthRequest="1" Color="{StaticResource CoalBorder}" HorizontalOptions="Start" Grid.RowSpan="3" />
-            
-            <Label Grid.Row="0" Text="DIAGNOSTICS" FontSize="11" FontAttributes="Bold" TextColor="{StaticResource SeaShellMuted}" Padding="20,24,20,16" CharacterSpacing="1.2" />
+
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Padding="20,16,12,12">
+                <Label Grid.Column="0" Text="DIAGNOSTICS" FontSize="11" FontAttributes="Bold"
+                       TextColor="{StaticResource SeaShellMuted}" CharacterSpacing="1.2"
+                       VerticalOptions="Center" />
+                <Button Grid.Column="1" x:Name="ToggleLogsBtn" Text="×"
+                        Clicked="OnToggleLogsPanelClicked"
+                        BackgroundColor="Transparent"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        FontSize="16" Padding="8,0"
+                        HeightRequest="32" WidthRequest="32"
+                        CornerRadius="4" />
+            </Grid>
             <BoxView Grid.Row="0" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="End" />
 
             <!-- Metrics bar -->

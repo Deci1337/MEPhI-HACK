@@ -1,8 +1,18 @@
-﻿<maui:MauiWinUIApplication
+<maui:MauiWinUIApplication
     x:Class="MassangerMaximka.WinUI.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:maui="using:Microsoft.Maui"
     xmlns:local="using:MassangerMaximka.WinUI">
+
+    <maui:MauiWinUIApplication.Resources>
+        <ResourceDictionary>
+            <!-- Remove blue focus/unfocus border on TextBox (Entry) -->
+            <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+            <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="Transparent" />
+        </ResourceDictionary>
+    </maui:MauiWinUIApplication.Resources>
 
 </maui:MauiWinUIApplication>
