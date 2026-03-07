@@ -15,8 +15,9 @@ public sealed class ChatItem : INotifyPropertyChanged
     public bool IsText => VoicePath == null && ImageBytes == null;
 
     public LayoutOptions BubbleAlign => IsSystem ? LayoutOptions.Center : (IsFromMe ? LayoutOptions.End : LayoutOptions.Start);
-    public Color BubbleBg => IsSystem ? Colors.Transparent : (IsFromMe ? Color.FromArgb("#FFFFFF") : Color.FromArgb("#1A1A1A"));
-    public Color BubbleTextColor => IsSystem ? Color.FromArgb("#888888") : (IsFromMe ? Color.FromArgb("#000000") : Color.FromArgb("#FFFFFF"));
+    public Color BubbleBg => IsSystem ? Colors.Transparent : (IsFromMe ? Color.FromArgb("#000000") : Color.FromArgb("#2A2A2A"));
+    public Color BubbleTextColor => IsSystem ? Color.FromArgb("#888888") : Color.FromArgb("#FFFFFF");
+    public Color BubbleStrokeColor => IsSystem ? Colors.Transparent : (IsFromMe ? Colors.White : Color.FromArgb("#3A3A3A"));
     public Thickness BubblePadding => IsSystem ? new Thickness(0, 4) : new Thickness(14, 10);
     public int BubbleRadius => IsSystem ? 0 : 16;
     public int BubbleStrokeThickness => IsSystem ? 0 : 1;

@@ -275,7 +275,7 @@
                             <Grid IsVisible="{Binding IsText}">
                                 <Border BackgroundColor="{Binding BubbleBg}"
                                         StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        Stroke="{StaticResource CoalBorder}"
+                                        Stroke="{Binding BubbleStrokeColor}"
                                         Padding="{Binding BubblePadding}"
                                         MaximumWidthRequest="500"
                                         HorizontalOptions="{Binding BubbleAlign}">
@@ -298,7 +298,7 @@
                             <Grid IsVisible="{Binding IsVoice}">
                                 <Border BackgroundColor="{Binding BubbleBg}"
                                         StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        Stroke="{StaticResource CoalBorder}"
+                                        Stroke="{Binding BubbleStrokeColor}"
                                         Padding="12,10"
                                         HorizontalOptions="{Binding BubbleAlign}">
                                     <Border.StrokeShape>
@@ -322,7 +322,7 @@
                             <Grid IsVisible="{Binding IsImage}">
                                 <Border BackgroundColor="{Binding BubbleBg}"
                                         StrokeThickness="{Binding BubbleStrokeThickness}"
-                                        Stroke="{StaticResource CoalBorder}"
+                                        Stroke="{Binding BubbleStrokeColor}"
                                         Padding="8"
                                         HorizontalOptions="{Binding BubbleAlign}">
                                     <Border.StrokeShape>

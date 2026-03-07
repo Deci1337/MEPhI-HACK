@@ -224,6 +224,20 @@ namespace MassangerMaximka
             if (_discovery?.Peers.TryGetValue(nodeId, out var peer) == true
                 && !string.IsNullOrWhiteSpace(peer.DisplayName))
                 return peer.DisplayName;
+
+            var endPoint = _connections?.GetPeerEndPoint(nodeId);
+            if (endPoint == null)
+                _peerEndpointMap.TryGetValue(nodeId, out endPoint);
+
+            if (endPoint != null)
+            {
+                var saved = _savedPeers.FirstOrDefault(p =>
+                    p.Port == endPoint.Port &&
+                    string.Equals(p.IpAddress, endPoint.Address.ToString(), StringComparison.OrdinalIgnoreCase));
+                if (saved != null && !string.IsNullOrWhiteSpace(saved.DisplayName))
+                    return saved.DisplayName;
+            }
+
             return nodeId.Length > 8 ? nodeId[..8] : nodeId;
         }
 
@@ -742,11 +756,7 @@ namespace MassangerMaximka
 
         private async void OnPeerDoubleTapped(object? sender, TappedEventArgs e)
         {
-            string? displayText = null;
-            if (sender is Label label)
-                displayText = label.Text;
-            else if (sender is Grid grid && grid.Children.OfType<Label>().FirstOrDefault() is Label childLabel)
-                displayText = childLabel.Text;
+            var displayText = (sender as Element)?.BindingContext as string;
 
             if (string.IsNullOrWhiteSpace(displayText))
                 return;
@@ -823,9 +833,13 @@ namespace MassangerMaximka
             }
             if (_connections?.IsConnected(toNodeId) != true)
             {
-                AppendChat("[Error] Peer is not connected. Double-tap the peer or press Connect first.");
-                TechLog(LogCat.Network, $"SEND blocked: {toNodeId} not connected");
-                return;
+                toNodeId = await EnsureSelectedPeerConnectedAsync(toNodeId);
+                if (string.IsNullOrWhiteSpace(toNodeId) || _connections?.IsConnected(toNodeId) != true)
+                {
+                    AppendChat("[Error] Peer is not connected. Double-tap the peer or press Connect first.");
+                    TechLog(LogCat.Network, $"SEND blocked: {toNodeId} not connected");
+                    return;
+                }
             }
             TechLog(LogCat.Transport, $"SEND ChatPacket to={toNodeId} len={text.Length}");
             var sentMsg = await _chat.SendMessageAsync(toNodeId, text);
@@ -1965,12 +1979,61 @@ namespace MassangerMaximka
             if (string.IsNullOrWhiteSpace(ipAddress) || port <= 0)
                 return;
             var existing = _savedPeers.FindIndex(p => p.IpAddress.Equals(ipAddress, StringComparison.OrdinalIgnoreCase) && p.Port == port);
-            var peer = new SavedPeer(string.IsNullOrWhiteSpace(displayName) ? ipAddress : displayName, ipAddress, port);
+            var finalDisplayName = string.IsNullOrWhiteSpace(displayName) ? ipAddress : displayName;
+            if (existing >= 0)
+            {
+                var existingPeer = _savedPeers[existing];
+                if (LooksLikePlaceholderName(finalDisplayName) && !LooksLikePlaceholderName(existingPeer.DisplayName))
+                    finalDisplayName = existingPeer.DisplayName;
+            }
+
+            var peer = new SavedPeer(finalDisplayName, ipAddress, port);
             if (existing >= 0)
                 _savedPeers[existing] = peer;
             else
                 _savedPeers.Add(peer);
             SaveSavedPeers();
+        }
+
+        private async Task<string?> EnsureSelectedPeerConnectedAsync(string? nodeId)
+        {
+            if (_connections == null)
+                return nodeId;
+
+            var display = PeersList.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(display) && !string.IsNullOrWhiteSpace(nodeId))
+                display = _peers.FirstOrDefault(p => p.Contains(nodeId, StringComparison.Ordinal));
+
+            var endpointText = ExtractEndPoint(display ?? string.Empty) ?? ManualIpEntry.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(endpointText) || !ParseEndpoint(endpointText, out var ip, out var port))
+                return nodeId;
+
+            var connectNodeId = NormalizeNodeId(ExtractNodeId(display ?? string.Empty), endpointText)
+                ?? nodeId
+                ?? $"endpoint:{ip}:{port}";
+
+            var endPoint = new IPEndPoint(ip, port);
+            TechLog(LogCat.Network, $"Auto-connect on send -> {ip}:{port}");
+            var ok = await _connections.ConnectToPeerAsync(connectNodeId, endPoint);
+            if (!ok)
+                return nodeId;
+
+            var connectedNodeId = PromoteConnectedPeer(endPoint, connectNodeId);
+            RefreshPeersList();
+            if (_activeChatPeer == null || _activeChatPeer == nodeId || _activeChatPeer == connectNodeId)
+                SwitchChat(connectedNodeId);
+            return connectedNodeId;
+        }
+
+        private static bool LooksLikePlaceholderName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return true;
+
+            if (value.StartsWith("endpoint:", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return value.Length == 8 && value.All(Uri.IsHexDigit);
         }
 
         private static async Task<string> PickOrCreateTestFileAsync()
