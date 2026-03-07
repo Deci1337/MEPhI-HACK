@@ -299,6 +299,7 @@ namespace MassangerMaximka
                         if (callerIp != null)
                         {
                             SetChannelVoiceEndPoints();
+                            _ = SendChannelVoiceReadyAsync(msg.FromNodeId);
                             if (!_isInCall) _ = StartChannelCallAsync();
                         }
                     }
@@ -319,6 +320,16 @@ namespace MassangerMaximka
 
                 if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal) || text == CallAcceptLegacy)
                 {
+                    if (_activeChannelId != null && _channelMembers.Contains(msg.FromNodeId))
+                    {
+                        if (text.StartsWith(CallAcceptPrefix, StringComparison.Ordinal))
+                            _peerVoicePortMap[msg.FromNodeId] = ParseVoicePortPayload(text[CallAcceptPrefix.Length..]);
+
+                        SetChannelVoiceEndPoints();
+                        TechLog(LogCat.Protocol, $"CHANNEL CALL_ACCEPT from {msg.FromNodeId} voice_port={_peerVoicePortMap.GetValueOrDefault(msg.FromNodeId)}");
+                        return;
+                    }
+
                     if (_isCallingOut && _callPeerIp != null)
                     {
                         _isCallingOut = false;
@@ -657,13 +668,14 @@ namespace MassangerMaximka
             var extras = new List<System.Net.IPEndPoint>();
             foreach (var m in _channelMembers.Where(m => m != _localNodeId))
             {
-                if (_peerEndpointMap.TryGetValue(m, out var tcpEp))
+                var tcpEp = ResolveConnectedPeerEndPoint(m);
+                if (tcpEp != null && _peerVoicePortMap.TryGetValue(m, out var voicePort))
                 {
-                    var voicePort = _peerVoicePortMap.TryGetValue(m, out var vp) ? vp : _voice.ListenPort;
                     extras.Add(new System.Net.IPEndPoint(tcpEp.Address, voicePort));
                 }
             }
             _voice.SetExtraEndPoints(extras);
+            TechLog(LogCat.Network, $"Channel voice endpoints ready: {extras.Count}/{_channelMembers.Count - (_localNodeId != null ? 1 : 0)}");
         }
 
         // --- Peers ---
@@ -1168,8 +1180,7 @@ namespace MassangerMaximka
 
             var voicePort = _voice.ListenPort;
             if (_localNodeId != null) _peerVoicePortMap[_localNodeId] = voicePort;
-            foreach (var m in _channelMembers.Where(m => m != _localNodeId))
-                _ = SendCallSignalAsync(m, $"{CallRequestPrefix}{voicePort}");
+            await AnnounceChannelVoicePortAsync();
 
             RecordBtn.IsVisible = false;
             StopSendBtn.IsVisible = false;
@@ -1287,6 +1298,34 @@ namespace MassangerMaximka
             TechLog(LogCat.Protocol, $"CALL_REJECT sent to {fromNodeId}");
         }
 
+        private async Task AnnounceChannelVoicePortAsync()
+        {
+            if (_activeChannelId == null || _voice == null)
+                return;
+
+            var voicePort = _voice.ListenPort;
+            if (_localNodeId != null)
+                _peerVoicePortMap[_localNodeId] = voicePort;
+
+            foreach (var m in _channelMembers.Where(m => m != _localNodeId))
+                await SendCallSignalAsync(m, $"{CallRequestPrefix}{voicePort}");
+
+            TechLog(LogCat.Protocol, $"CHANNEL VOICE_PORT announce={voicePort} peers={_channelMembers.Count - (_localNodeId != null ? 1 : 0)}");
+        }
+
+        private async Task SendChannelVoiceReadyAsync(string toNodeId)
+        {
+            if (_activeChannelId == null || _voice == null || string.IsNullOrWhiteSpace(toNodeId))
+                return;
+
+            var voicePort = _voice.ListenPort;
+            if (_localNodeId != null)
+                _peerVoicePortMap[_localNodeId] = voicePort;
+
+            await SendCallSignalAsync(toNodeId, $"{CallAcceptPrefix}{voicePort}");
+            TechLog(LogCat.Protocol, $"CHANNEL CALL_ACCEPT sent to {toNodeId} voice_port={voicePort}");
+        }
+
         private void ShowIncomingCallBanner(string fromNodeId)
         {
             IncomingCallLabel.Text = $"Incoming call from {fromNodeId}";
@@ -1327,6 +1366,12 @@ namespace MassangerMaximka
             PttBtn.BackgroundColor = Color.FromArgb("#F44336");
             PttBtn.Text = "TALKING";
             VoiceStatusLabel.Text = "TALKING...";
+            if (_activeChannelId != null)
+            {
+                SetChannelVoiceEndPoints();
+                await AnnounceChannelVoicePortAsync();
+                await Task.Delay(120);
+            }
             BroadcastPttSignal(PttStartSignal);
             await _voiceCallManager.StartTalkingAsync();
         }
