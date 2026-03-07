@@ -67,6 +67,8 @@ public sealed class VoiceCallManager : IDisposable
         if (!_active || _talking) return;
         _talking = true;
         _recordedSampleRate = 0;
+        _firstFrameSent = false;
+        _transport.ResetSendDiagnostics();
 
         try
         {
@@ -242,7 +244,7 @@ public sealed class VoiceCallManager : IDisposable
 
             if (sent % 8 == 0) await Task.Delay(3);
         }
-        Log?.Invoke($"PTT: sent {sent} chunks, {pcm.Length}B, ~{WavHelper.EstimateDurationMs(pcm.Length)}ms");
+        Log?.Invoke($"PTT: sent {sent} chunks, {pcm.Length}B, ~{WavHelper.EstimateDurationMs(pcm.Length)}ms, udp_out={_transport.Metrics.FramesSent} remote={_transport.RemoteEndPoint?.ToString() ?? "null"} extras={_transport.ExtraEndPointCount}");
     }
 
     private void OnFrameReceived(byte[] pcmData)
