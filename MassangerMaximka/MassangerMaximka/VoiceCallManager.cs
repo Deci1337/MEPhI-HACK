@@ -6,11 +6,13 @@ namespace MassangerMaximka;
 
 /// <summary>
 /// Walkie-talkie voice call: hold Talk to record, release to send.
-/// Receives and plays back incoming frames continuously.
+/// Receives and plays back incoming frames as a single continuous WAV.
 /// </summary>
 public sealed class VoiceCallManager : IDisposable
 {
     private const int PcmChunkSize = 6400; // 200ms at 16kHz mono 16-bit
+    private const int AccumulateMs = 350;
+    private static readonly int[] FallbackSampleRates = [16000, 44100, 48000];
 
     private readonly UdpVoiceTransport _transport;
     private readonly IAudioManager _audioManager;
@@ -20,6 +22,7 @@ public sealed class VoiceCallManager : IDisposable
     private volatile bool _active;
     private volatile bool _talking;
     private IAudioRecorder? _talkRecorder;
+    private int _recordedSampleRate;
     private int _receivedCount;
     private volatile bool _firstFrameSent;
     private volatile bool _firstFrameReceived;
@@ -49,7 +52,6 @@ public sealed class VoiceCallManager : IDisposable
         Log?.Invoke("Walkie-talkie ready. Hold Talk to speak.");
     }
 
-    /// <summary>Start playback loop only (channel mode where transport is already listening).</summary>
     public void StartChannelMode()
     {
         if (_active) return;
@@ -64,42 +66,40 @@ public sealed class VoiceCallManager : IDisposable
     {
         if (!_active || _talking) return;
         _talking = true;
+        _recordedSampleRate = 0;
 
-        int usedSampleRate = 0;
         try
         {
-            _talkRecorder = _audioManager.CreateRecorder();
-            try
+            foreach (var rate in FallbackSampleRates)
             {
-                await _talkRecorder.StartAsync(new AudioRecorderOptions
+                try
                 {
-                    SampleRate = 16000,
-                    Channels = ChannelType.Mono,
-                    BitDepth = BitDepth.Pcm16bit,
-                    Encoding = Plugin.Maui.Audio.Encoding.Wav,
-                    ThrowIfNotSupported = true
-                });
-                usedSampleRate = 16000;
-            }
-            catch
-            {
-                _talkRecorder = _audioManager.CreateRecorder();
-                await _talkRecorder.StartAsync(new AudioRecorderOptions
+                    _talkRecorder = _audioManager.CreateRecorder();
+                    await _talkRecorder.StartAsync(new AudioRecorderOptions
+                    {
+                        SampleRate = rate,
+                        Channels = ChannelType.Mono,
+                        BitDepth = BitDepth.Pcm16bit,
+                        Encoding = Plugin.Maui.Audio.Encoding.Wav,
+                        ThrowIfNotSupported = rate != FallbackSampleRates[^1]
+                    });
+                    _recordedSampleRate = rate;
+                    Log?.Invoke($"PTT: recording at {rate}Hz");
+                    return;
+                }
+                catch (Exception ex)
                 {
-                    SampleRate = 44100,
-                    Channels = ChannelType.Mono,
-                    BitDepth = BitDepth.Pcm16bit,
-                    Encoding = Plugin.Maui.Audio.Encoding.Wav,
-                    ThrowIfNotSupported = false
-                });
-                usedSampleRate = 44100;
+                    Log?.Invoke($"PTT: {rate}Hz failed ({ex.Message}), trying next...");
+                }
             }
-            Log?.Invoke($"PTT: recording at {usedSampleRate}Hz...");
+
+            _talking = false;
+            LogError?.Invoke("PTT: all sample rates failed");
         }
         catch (Exception ex)
         {
             _talking = false;
-            LogError?.Invoke($"PTT record error (both sample rates failed): {ex.Message}");
+            LogError?.Invoke($"PTT record error: {ex.Message}");
         }
     }
 
@@ -107,91 +107,27 @@ public sealed class VoiceCallManager : IDisposable
     {
         if (!_talking || _talkRecorder == null) return;
         _talking = false;
+
         try
         {
             var source = await _talkRecorder.StopAsync();
             _talkRecorder = null;
 
-            byte[]? wavBytes = null;
-
-            if (source is FileAudioSource fsa)
-            {
-                var filePath = fsa.GetFilePath();
-                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
-                {
-                    wavBytes = await File.ReadAllBytesAsync(filePath);
-                    Log?.Invoke($"PTT: wav file read {wavBytes.Length}B from {filePath}");
-                    try { File.Delete(filePath); } catch { }
-                }
-            }
-
-            // Fallback: read via stream (works on Android when FileAudioSource path is unavailable)
+            var wavBytes = await ReadRecordedAudioAsync(source);
             if (wavBytes == null || wavBytes.Length <= WavHelper.HeaderSize)
             {
-                try
-                {
-                    await using var stream = source.GetAudioStream();
-                    if (stream != null)
-                    {
-                        using var ms = new MemoryStream();
-                        await stream.CopyToAsync(ms);
-                        wavBytes = ms.ToArray();
-                        Log?.Invoke($"PTT: wav stream fallback read {wavBytes.Length}B");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log?.Invoke($"PTT stream fallback error: {ex.Message}");
-                }
-            }
-
-            if (wavBytes == null || wavBytes.Length <= WavHelper.HeaderSize) return;
-
-            var info = WavHelper.ParseWav(wavBytes);
-
-            if (info.SampleRate < 8000 || info.SampleRate > 96000)
-            {
-                Log?.Invoke($"PTT: invalid sample rate {info.SampleRate}, defaulting to 16000");
-                info = new WavHelper.WavInfo(16000, info.ChannelCount, info.BitsPerSample, info.PcmData);
-            }
-
-            var pcm = info.PcmData;
-
-            if (pcm.Length == 0)
-            {
-                LogError?.Invoke("PTT: recorded file produced 0 bytes of PCM");
+                LogError?.Invoke("PTT: no audio data captured");
                 return;
             }
 
-            Log?.Invoke($"PTT raw: rate={info.SampleRate} ch={info.ChannelCount} bits={info.BitsPerSample} pcm={pcm.Length}B");
-
-            if (info.ChannelCount == 2 && info.BitsPerSample == 16)
-                pcm = WavHelper.StereoToMono(pcm);
-
-            if (info.SampleRate != WavHelper.SampleRate)
-                pcm = WavHelper.Resample16BitMono(pcm, info.SampleRate, WavHelper.SampleRate);
-
-            if (pcm.Length == 0) return;
-
-            int sent = 0;
-            for (int i = 0; i < pcm.Length; i += PcmChunkSize)
+            var pcm = NormalizePcm(wavBytes);
+            if (pcm.Length == 0)
             {
-                var len = Math.Min(PcmChunkSize, pcm.Length - i);
-                var chunk = new byte[len];
-                Buffer.BlockCopy(pcm, i, chunk, 0, len);
-
-                if (!_firstFrameSent)
-                {
-                    _firstFrameSent = true;
-                    var ep = _transport.RemoteEndPoint?.ToString() ?? "unknown";
-                    Log?.Invoke($"Voice TX: first frame sent to {ep}, {chunk.Length} bytes");
-                }
-
-                await _transport.SendFrameAsync(chunk);
-                sent++;
-                if (sent % 10 == 0) await Task.Delay(1);
+                LogError?.Invoke("PTT: normalization produced 0 bytes");
+                return;
             }
-            Log?.Invoke($"PTT: sent {sent} chunks, {pcm.Length}B, ~{WavHelper.EstimateDurationMs(pcm.Length)}ms");
+
+            await SendPcmChunksAsync(pcm);
         }
         catch (Exception ex)
         {
@@ -215,6 +151,99 @@ public sealed class VoiceCallManager : IDisposable
         while (_playbackQueue.TryDequeue(out _)) { }
     }
 
+    private async Task<byte[]?> ReadRecordedAudioAsync(IAudioSource source)
+    {
+        byte[]? wavBytes = null;
+
+        if (source is FileAudioSource fsa)
+        {
+            try
+            {
+                var filePath = fsa.GetFilePath();
+                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                {
+                    wavBytes = await File.ReadAllBytesAsync(filePath);
+                    Log?.Invoke($"PTT: read {wavBytes.Length}B from file");
+                    try { File.Delete(filePath); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"PTT: file read failed: {ex.Message}");
+            }
+        }
+
+        if (wavBytes == null || wavBytes.Length <= WavHelper.HeaderSize)
+        {
+            try
+            {
+                await using var stream = source.GetAudioStream();
+                if (stream != null)
+                {
+                    using var ms = new MemoryStream();
+                    await stream.CopyToAsync(ms);
+                    wavBytes = ms.ToArray();
+                    Log?.Invoke($"PTT: read {wavBytes.Length}B from stream");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"PTT: stream read failed: {ex.Message}");
+            }
+        }
+
+        return wavBytes;
+    }
+
+    private byte[] NormalizePcm(byte[] wavBytes)
+    {
+        var info = WavHelper.ParseWav(wavBytes);
+
+        var rate = info.SampleRate;
+        if (rate < 8000 || rate > 96000)
+        {
+            rate = _recordedSampleRate > 0 ? _recordedSampleRate : 16000;
+            Log?.Invoke($"PTT: bad sample rate {info.SampleRate}, using {rate}");
+        }
+
+        var pcm = info.PcmData;
+        if (pcm.Length == 0) return pcm;
+
+        Log?.Invoke($"PTT: raw rate={rate} ch={info.ChannelCount} bits={info.BitsPerSample} pcm={pcm.Length}B");
+
+        if (info.ChannelCount == 2 && info.BitsPerSample == 16)
+            pcm = WavHelper.StereoToMono(pcm);
+
+        if (rate != WavHelper.SampleRate)
+            pcm = WavHelper.Resample16BitMono(pcm, rate, WavHelper.SampleRate);
+
+        return pcm;
+    }
+
+    private async Task SendPcmChunksAsync(byte[] pcm)
+    {
+        int sent = 0;
+        for (int i = 0; i < pcm.Length; i += PcmChunkSize)
+        {
+            var len = Math.Min(PcmChunkSize, pcm.Length - i);
+            var chunk = new byte[len];
+            Buffer.BlockCopy(pcm, i, chunk, 0, len);
+
+            if (!_firstFrameSent)
+            {
+                _firstFrameSent = true;
+                Log?.Invoke($"Voice TX: first frame to {_transport.RemoteEndPoint?.ToString() ?? "multicast"}, {chunk.Length}B");
+            }
+
+            await _transport.SendFrameAsync(chunk);
+            sent++;
+
+            // Pace sends: 5ms every 5 chunks to avoid UDP burst loss
+            if (sent % 5 == 0) await Task.Delay(5);
+        }
+        Log?.Invoke($"PTT: sent {sent} chunks, {pcm.Length}B, ~{WavHelper.EstimateDurationMs(pcm.Length)}ms");
+    }
+
     private void OnFrameReceived(byte[] pcmData)
     {
         if (!_active || pcmData.Length == 0) return;
@@ -222,18 +251,21 @@ public sealed class VoiceCallManager : IDisposable
         if (!_firstFrameReceived)
         {
             _firstFrameReceived = true;
-            Log?.Invoke($"Voice RX: first frame received, {pcmData.Length} bytes");
+            Log?.Invoke($"Voice RX: first frame, {pcmData.Length}B");
         }
 
         _playbackQueue.Enqueue(pcmData);
         var count = Interlocked.Increment(ref _receivedCount);
         if (count % 10 == 1)
-            Log?.Invoke($"Voice RX: received={count} queue={_playbackQueue.Count} pcm={pcmData.Length}B");
+            Log?.Invoke($"Voice RX: total={count} queue={_playbackQueue.Count} pcm={pcmData.Length}B");
     }
 
+    /// <summary>
+    /// Accumulates all PCM chunks from a PTT burst into one WAV and plays it
+    /// as a single audio clip, avoiding rapid create/dispose of IAudioPlayer.
+    /// </summary>
     private async Task PlaybackLoopAsync(CancellationToken ct)
     {
-        int playedCount = 0;
         while (!ct.IsCancellationRequested)
         {
             if (_playbackQueue.IsEmpty)
@@ -242,28 +274,22 @@ public sealed class VoiceCallManager : IDisposable
                 continue;
             }
 
-            var batch = new List<byte[]>();
+            // Wait to accumulate the entire burst
+            await Task.Delay(AccumulateMs, ct);
+
             int totalBytes = 0;
-            while (batch.Count < 8 && _playbackQueue.TryDequeue(out var pcm))
+            var chunks = new List<byte[]>();
+            while (_playbackQueue.TryDequeue(out var pcm))
             {
-                batch.Add(pcm);
+                chunks.Add(pcm);
                 totalBytes += pcm.Length;
             }
-            if (batch.Count == 0) continue;
 
-            if (batch.Count < 3)
-            {
-                await Task.Delay(80, ct);
-                while (batch.Count < 8 && _playbackQueue.TryDequeue(out var extra))
-                {
-                    batch.Add(extra);
-                    totalBytes += extra.Length;
-                }
-            }
+            if (totalBytes == 0) continue;
 
             var merged = new byte[totalBytes];
             int offset = 0;
-            foreach (var chunk in batch)
+            foreach (var chunk in chunks)
             {
                 Buffer.BlockCopy(chunk, 0, merged, offset, chunk.Length);
                 offset += chunk.Length;
@@ -274,23 +300,13 @@ public sealed class VoiceCallManager : IDisposable
             {
                 var wav = WavHelper.WrapWithHeader(merged);
                 player = _audioManager.CreatePlayer(new MemoryStream(wav));
-
-                try
-                {
-                    player.Play();
-                }
-                catch (Exception ex)
-                {
-                    LogError?.Invoke($"Playback failed: {ex.Message}");
-                    continue;
-                }
+                player.Play();
 
                 var durationMs = WavHelper.EstimateDurationMs(merged.Length);
-                await Task.Delay(Math.Max(20, durationMs - 20), ct);
+                Log?.Invoke($"Voice PLAY: {chunks.Count} chunks, {merged.Length}B, ~{durationMs}ms");
 
-                playedCount += batch.Count;
-                if (playedCount % 10 < batch.Count)
-                    Log?.Invoke($"Voice PLAY: played={playedCount} frames={batch.Count} pcm={merged.Length}B dur={durationMs}ms");
+                // Wait for playback to finish + small buffer
+                await Task.Delay(Math.Max(100, durationMs + 50), ct);
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { LogError?.Invoke($"Playback error: {ex.Message}"); }

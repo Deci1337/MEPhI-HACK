@@ -111,15 +111,17 @@ public sealed class UdpVoiceTransport : IDisposable
 
     private async Task ReceiveLoopAsync(CancellationToken ct)
     {
+        int consecutiveErrors = 0;
         while (!ct.IsCancellationRequested && _udpClient != null)
         {
             try
             {
                 var result = await _udpClient.ReceiveAsync(ct);
+                consecutiveErrors = 0;
+
                 var frame = DeserializeFrame(result.Buffer);
                 if (frame == null) continue;
 
-                // Filter keepalive-sized frames -- they are silence padding, not real audio
                 if (frame.Data.Length <= KeepaliveDataSize)
                 {
                     var rxCount = Interlocked.Increment(ref _keepaliveRxCount);
@@ -141,7 +143,20 @@ public sealed class UdpVoiceTransport : IDisposable
                 while (_jitterBuffer.TryDequeue(out var playFrame))
                     FrameReceived?.Invoke(playFrame.Data);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException) { break; }
+            catch (SocketException ex)
+            {
+                consecutiveErrors++;
+                Metrics.PacketsLost++;
+                _logger.LogWarning(ex, "Voice socket error #{N}", consecutiveErrors);
+                if (consecutiveErrors > 50)
+                {
+                    _logger.LogError("Voice receive loop: too many consecutive socket errors, stopping");
+                    break;
+                }
+                await Task.Delay(10, ct);
+            }
+            catch (Exception ex)
             {
                 Metrics.PacketsLost++;
                 _logger.LogWarning(ex, "Voice receive error");
@@ -223,12 +238,14 @@ public sealed class UdpVoiceTransport : IDisposable
         {
             try
             {
-                var client = new UdpClient(preferredPort + offset);
+                // Explicitly bind IPv4 to avoid Windows dual-stack issues where
+                // an IPv6 socket silently drops IPv4 peer packets.
+                var client = new UdpClient(new IPEndPoint(IPAddress.Any, preferredPort + offset));
                 return client;
             }
             catch (SocketException) { }
         }
-        return new UdpClient(0);
+        return new UdpClient(new IPEndPoint(IPAddress.Any, 0));
     }
 
     private static byte[] SerializeFrame(VoiceFrame frame)
