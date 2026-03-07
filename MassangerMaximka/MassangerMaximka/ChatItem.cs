@@ -7,8 +7,10 @@ public sealed class ChatItem : INotifyPropertyChanged
 {
     public string Text { get; init; } = "";
     public string? VoicePath { get; init; }
+    public byte[]? ImageBytes { get; init; }
     public bool IsVoice => VoicePath != null;
-    public bool IsText => VoicePath == null;
+    public bool IsImage => ImageBytes != null;
+    public bool IsText => VoicePath == null && ImageBytes == null;
 
     private string? _status;
     public string? Status

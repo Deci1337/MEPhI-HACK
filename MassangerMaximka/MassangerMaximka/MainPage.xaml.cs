@@ -102,6 +102,7 @@ namespace MassangerMaximka
             _connections.PeerDisconnected += OnPeerDisconnected;
             _connections.EnvelopeReceived += OnEnvelopeReceivedLog;
             _chat.MessageReceived += OnMessageReceived;
+            _chat.ImageReceived += OnImageReceived;
             _chat.DeliveryStatusChanged += OnDeliveryStatusChanged;
             _files.TransferProgressChanged += OnTransferProgressChanged;
             _files.FileReceived += OnFileReceived;
@@ -148,7 +149,7 @@ namespace MassangerMaximka
             _voiceCallManager = null;
             if (_discovery != null) { _discovery.PeerDiscovered -= OnPeerDiscovered; _discovery.PeerLost -= OnPeerLost; }
             if (_connections != null) { _connections.PeerConnected -= OnPeerConnected; _connections.PeerDisconnected -= OnPeerDisconnected; _connections.EnvelopeReceived -= OnEnvelopeReceivedLog; }
-            if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
+            if (_chat != null) { _chat.MessageReceived -= OnMessageReceived; _chat.ImageReceived -= OnImageReceived; _chat.DeliveryStatusChanged -= OnDeliveryStatusChanged; }
             if (_files != null) { _files.TransferProgressChanged -= OnTransferProgressChanged; _files.FileReceived -= OnFileReceived; }
             if (_metrics != null) _metrics.MetricsUpdated -= OnMetricsUpdated;
             DisposeVoicePlayback();
@@ -357,6 +358,18 @@ namespace MassangerMaximka
                 }
                 TechLog(LogCat.Protocol, $"RECV ChatPacket id={msg.MessageId} from={msg.FromNodeId}");
                 TechLog(LogCat.Encryption, $"Payload deserialized: {text.Length} chars, ts={msg.TimestampUtc}");
+            });
+        }
+
+        private void OnImageReceived(TransportImageMessage msg)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                AppendChat(
+                    $"{ResolveDisplayName(msg.FromNodeId)}: [Photo] {msg.FileName}",
+                    toPeer: msg.FromNodeId,
+                    imageBytes: msg.Data);
+                TechLog(LogCat.Transport, $"RECV image from={msg.FromNodeId} file={msg.FileName} bytes={msg.Data.Length}");
             });
         }
 
@@ -730,6 +743,58 @@ namespace MassangerMaximka
             {
                 AppendChat($"[Error] File send failed: {ex.Message}");
                 TechLog(LogCat.System, $"File send failed: {ex.Message}");
+            }
+        }
+
+        private async void OnSendPhotoClicked(object? sender, EventArgs e)
+        {
+            if (_chat == null)
+            {
+                AppendChat("[Error] Chat transport unavailable");
+                return;
+            }
+
+            var toNodeId = GetSelectedOrFirstPeerNodeId();
+            if (string.IsNullOrEmpty(toNodeId))
+            {
+                AppendChat("[Error] Select a peer first");
+                return;
+            }
+
+            try
+            {
+                var result = await FilePicker.Default.PickAsync(new PickOptions
+                {
+                    PickerTitle = "Select photo",
+                    FileTypes = FilePickerFileType.Images
+                });
+
+                if (result == null)
+                    return;
+
+                await using var stream = await result.OpenReadAsync();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                var bytes = ms.ToArray();
+                if (bytes.Length > 2 * 1024 * 1024)
+                {
+                    AppendChat("[Error] Photo is larger than 2 MB");
+                    TechLog(LogCat.System, $"Photo rejected: {bytes.Length} bytes exceeds 2MB");
+                    return;
+                }
+
+                await _chat.SendImageAsync(toNodeId, result.FileName, bytes);
+                AppendChat(
+                    $"Me: [Photo] {result.FileName}",
+                    status: "Sent",
+                    toPeer: toNodeId,
+                    imageBytes: bytes);
+                TechLog(LogCat.Transport, $"SEND image to={toNodeId} file={result.FileName} bytes={bytes.Length}");
+            }
+            catch (Exception ex)
+            {
+                AppendChat($"[Error] Photo send failed: {ex.Message}");
+                TechLog(LogCat.System, $"Photo send failed: {ex.Message}");
             }
         }
 
@@ -1171,10 +1236,15 @@ namespace MassangerMaximka
 
         // --- Logging ---
 
-        private ChatItem AppendChat(string line, string? status = null, string? toPeer = null)
+        private ChatItem AppendChat(string line, string? status = null, string? toPeer = null, byte[]? imageBytes = null)
         {
             var collection = !string.IsNullOrEmpty(toPeer) ? GetOrCreatePeerChat(toPeer) : _chatItems;
-            var item = new ChatItem { Text = $"{DateTime.Now:HH:mm:ss} {line}", Status = status };
+            var item = new ChatItem
+            {
+                Text = $"{DateTime.Now:HH:mm:ss} {line}",
+                Status = status,
+                ImageBytes = imageBytes
+            };
             collection.Add(item);
             if (collection.Count > 200) collection.RemoveAt(0);
             if (ReferenceEquals(collection, _chatItems) && collection.Count > 0)

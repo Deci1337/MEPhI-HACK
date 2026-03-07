@@ -24,6 +24,7 @@ public enum TransportPacketType : byte
     FileChunkAck = 12,
     FileComplete = 13,
     FileResumeRequest = 14,
+    Image = 15,
     VoiceFrame = 20,
     Relay = 30,
     Discovery = 40,

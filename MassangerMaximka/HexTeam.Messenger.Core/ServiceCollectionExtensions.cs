@@ -111,6 +111,12 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<ILogger<TcpChatTransport>>()));
 
         services.AddSingleton(sp =>
+            new ChannelService(
+                config.NodeId,
+                sp.GetRequiredService<TcpChatTransport>(),
+                sp.GetRequiredService<ILogger<ChannelService>>()));
+
+        services.AddSingleton(sp =>
             new RelayForwarder(config.NodeId,
                 sp.GetRequiredService<PeerConnectionService>(),
                 sp.GetRequiredService<ILogger<RelayForwarder>>()));

@@ -2,9 +2,16 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:local="clr-namespace:MassangerMaximka"
+             xmlns:conv="clr-namespace:MassangerMaximka.Converters"
              x:Class="MassangerMaximka.MainPage"
              Title="PHOTON"
              BackgroundColor="{StaticResource Coal}">
+
+    <ContentPage.Resources>
+        <ResourceDictionary>
+            <conv:ByteArrayToImageSourceConverter x:Key="ByteArrayToImageSourceConverter" />
+        </ResourceDictionary>
+    </ContentPage.Resources>
 
     <!-- Two-column on Desktop, stacked on Phone -->
     <Grid ColumnSpacing="0" RowSpacing="0">
@@ -182,29 +189,44 @@
                                        FontSize="11" TextColor="{StaticResource SeaShellMuted}"
                                        VerticalOptions="Center" LineBreakMode="TailTruncation" />
                             </Grid>
+                            <!-- Image message -->
+                            <Grid IsVisible="{Binding IsImage}" RowDefinitions="Auto,Auto" RowSpacing="4">
+                                <Label Grid.Row="0" Text="{Binding Text}"
+                                       FontSize="11" TextColor="{StaticResource SeaShellMuted}"
+                                       LineBreakMode="TailTruncation" />
+                                <Image Grid.Row="1"
+                                       Source="{Binding ImageBytes, Converter={StaticResource ByteArrayToImageSourceConverter}}"
+                                       HeightRequest="200"
+                                       WidthRequest="200"
+                                       Aspect="AspectFill" />
+                            </Grid>
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
             </CollectionView>
 
             <!-- Message input bar -->
-            <Grid Grid.Row="4" Padding="8,6" ColumnDefinitions="Auto,*,Auto,Auto"
+            <Grid Grid.Row="4" Padding="8,6" ColumnDefinitions="Auto,Auto,*,Auto,Auto"
                   ColumnSpacing="6" BackgroundColor="{StaticResource CoalPanel}">
-                <BoxView Grid.ColumnSpan="4" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
+                <BoxView Grid.ColumnSpan="5" HeightRequest="1" Color="{StaticResource CoalBorder}" VerticalOptions="Start" />
                 <Button Grid.Column="0" Text="File" Clicked="OnSendTestFileClicked"
                         BackgroundColor="{StaticResource CoalSurface}"
                         TextColor="{StaticResource SeaShellMuted}"
                         FontSize="10" Padding="10,6" CornerRadius="3" />
-                <Entry Grid.Column="1" x:Name="MessageEntry" Placeholder="Message..."
+                <Button Grid.Column="1" Text="Photo" Clicked="OnSendPhotoClicked"
+                        BackgroundColor="{StaticResource CoalSurface}"
+                        TextColor="{StaticResource SeaShellMuted}"
+                        FontSize="10" Padding="10,6" CornerRadius="3" />
+                <Entry Grid.Column="2" x:Name="MessageEntry" Placeholder="Message..."
                        BackgroundColor="{StaticResource CoalInput}"
                        TextColor="{StaticResource SeaShell}"
                        PlaceholderColor="{StaticResource SeaShellMuted}"
                        FontSize="{OnIdiom Phone=12, Default=13}" />
-                <Button Grid.Column="2" Text="X" Clicked="OnClearChatClicked"
+                <Button Grid.Column="3" Text="X" Clicked="OnClearChatClicked"
                         BackgroundColor="{StaticResource CoalSurface}"
                         TextColor="{StaticResource SeaShellMuted}"
                         FontSize="10" Padding="8,6" CornerRadius="3" />
-                <Button Grid.Column="3" Text="Send" Clicked="OnSendClicked"
+                <Button Grid.Column="4" Text="Send" Clicked="OnSendClicked"
                         BackgroundColor="{StaticResource AccentBlue}"
                         TextColor="{StaticResource SeaShell}"
                         FontSize="{OnIdiom Phone=11, Default=12}"
