@@ -92,6 +92,22 @@ public sealed class ChannelService
         MembersUpdated?.Invoke(Clone(channel));
     }
 
+    public async Task LeaveChannel(CancellationToken ct = default)
+    {
+        if (ActiveChannelId == null || !_channels.TryGetValue(ActiveChannelId, out var channel)) return;
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new ChannelPacket
+        {
+            ChannelId = channel.ChannelId,
+            ChannelName = channel.ChannelName,
+            FromNodeId = _localNodeId,
+            MemberNodeIds = channel.MemberNodeIds.ToList()
+        });
+        foreach (var nodeId in channel.MemberNodeIds.Where(id => id != _localNodeId))
+            await _chatTransport.SendPacketAsync(nodeId, TransportPacketType.ChannelLeave, payload, ct);
+        _channels.Remove(ActiveChannelId);
+        ActiveChannelId = null;
+    }
+
     public async Task HandleMemberLeave(string nodeId, CancellationToken ct = default)
     {
         var channel = GetActiveChannelOrThrow();

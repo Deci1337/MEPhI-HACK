@@ -7,6 +7,7 @@ using HexTeam.Messenger.Core.Discovery;
 using HexTeam.Messenger.Core.FileTransfer;
 using HexTeam.Messenger.Core.Models;
 using HexTeam.Messenger.Core.Metrics;
+using HexTeam.Messenger.Core.Services;
 using HexTeam.Messenger.Core.Transport;
 using HexTeam.Messenger.Core.Voice;
 using Plugin.Maui.Audio;
@@ -44,6 +45,8 @@ namespace MassangerMaximka
         private ChannelService? _channelService;
         private ObservableCollection<ChatItem>? _channelChat;
         private string? _activeChannelId;
+        private List<string> _channelMembers = [];
+        private string? _activeChannelName;
 
         private const string CallRequestPrefix = "\x1FCALL_REQUEST:";
         private const string CallAcceptPrefix = "\x1FCALL_ACCEPT:";
@@ -131,8 +134,8 @@ namespace MassangerMaximka
 
         protected override void OnDisappearing()
         {
-            if (_channelService?.IsInChannel == true)
-                _ = _channelService.LeaveChannelAsync();
+            if (_channelService?.ActiveChannelId != null)
+                _ = _channelService.LeaveChannel();
             if (_channelService != null)
             {
                 _channelService.InviteReceived -= OnChannelInviteReceived;
@@ -236,9 +239,9 @@ namespace MassangerMaximka
                 var name = ResolveDisplayName(nodeId);
                 RefreshPeersList();
                 AppendChat($"[Disconnected] {name}", toPeer: nodeId);
-                if (_channelService?.Members.Contains(nodeId) == true)
+                if (_channelMembers.Contains(nodeId))
                 {
-                    _channelService.HandleMemberLeave(nodeId);
+                    _ = _channelService!.HandleMemberLeave(nodeId);
                     AppendToChannelChat($"[Channel] {name} disconnected");
                 }
                 TechLog(LogCat.Network, $"TCP disconnected: {name} ({nodeId})");
@@ -348,7 +351,7 @@ namespace MassangerMaximka
 
                 var senderName = ResolveDisplayName(msg.FromNodeId);
                 if (_activeChannelId != null &&
-                    _channelService?.Members.Contains(msg.FromNodeId) == true)
+                    _channelMembers.Contains(msg.FromNodeId))
                 {
                     AppendToChannelChat($"{senderName}: {text}");
                 }
@@ -464,7 +467,9 @@ namespace MassangerMaximka
             if (_channelService == null) return;
             var name = await DisplayPromptAsync("New Channel", "Channel name:", initialValue: "Group");
             if (string.IsNullOrWhiteSpace(name)) return;
-            _channelService.CreateChannel(name);
+            var packet = _channelService.CreateChannel(name);
+            _activeChannelName = packet.ChannelName;
+            _channelMembers = packet.MemberNodeIds;
             SwitchToChannel();
             TechLog(LogCat.Protocol, $"Channel created: {_channelService.ActiveChannelId} '{name}'");
             await InvitePeersToChannelAsync();
@@ -487,7 +492,7 @@ namespace MassangerMaximka
             var nodeId = colonIdx > 0 ? picked[(colonIdx + 1)..].TrimEnd(')') : null;
             if (string.IsNullOrEmpty(nodeId)) return;
 
-            await _channelService.SendInviteAsync(nodeId);
+            await _channelService.SendInvite(nodeId);
             AppendToChannelChat($"[Channel] Invite sent to {ResolveDisplayName(nodeId)}");
             TechLog(LogCat.Protocol, $"Channel invite sent to {nodeId}");
         }
@@ -503,7 +508,9 @@ namespace MassangerMaximka
                     "Join", "Decline");
                 if (accept)
                 {
-                    await _channelService!.JoinChannelAsync(invite);
+                    await _channelService!.JoinChannel(invite.ChannelId, invite.FromNodeId);
+                    _channelMembers = invite.MemberNodeIds;
+                    _activeChannelName = invite.ChannelName;
                     SwitchToChannel();
                     AppendToChannelChat($"[Channel] Joined '{invite.ChannelName}' created by {fromName}");
                     TechLog(LogCat.Protocol, $"Joined channel {invite.ChannelId}");
@@ -516,14 +523,15 @@ namespace MassangerMaximka
             });
         }
 
-        private void OnChannelMembersUpdated(List<string> members)
+        private void OnChannelMembersUpdated(ChannelPacket packet)
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
-                if (_channelService == null) return;
-                ChannelInfoLabel.Text = $"Channel: {_channelService.ActiveChannelId} | Members: {members.Count}";
+                _channelMembers = packet.MemberNodeIds;
+                if (!string.IsNullOrEmpty(packet.ChannelName)) _activeChannelName = packet.ChannelName;
+                ChannelInfoLabel.Text = $"Channel: {packet.ChannelId} | Members: {packet.MemberNodeIds.Count}";
                 SetChannelVoiceEndPoints();
-                TechLog(LogCat.Protocol, $"Channel members updated: {members.Count}");
+                TechLog(LogCat.Protocol, $"Channel members updated: {packet.MemberNodeIds.Count}");
             });
         }
 
@@ -533,9 +541,9 @@ namespace MassangerMaximka
             _activeChannelId = _channelService?.ActiveChannelId;
             _activeChatPeer = null;
             ChatList.ItemsSource = _channelChat;
-            SelectedPeerLabel.Text = $"#{_channelService?.ActiveChannelName ?? "channel"}";
+            SelectedPeerLabel.Text = $"#{_activeChannelName ?? "channel"}";
             ChannelBar.IsVisible = true;
-            ChannelInfoLabel.Text = $"Channel: {_channelService?.ActiveChannelId} | Members: {_channelService?.Members.Count ?? 0}";
+            ChannelInfoLabel.Text = $"Channel: {_channelService?.ActiveChannelId} | Members: {_channelMembers.Count}";
         }
 
         private void AppendToChannelChat(string text)
@@ -550,9 +558,11 @@ namespace MassangerMaximka
         private async void OnLeaveChannelClicked(object? sender, EventArgs e)
         {
             if (_channelService == null) return;
-            await _channelService.LeaveChannelAsync();
+            await _channelService.LeaveChannel();
             _activeChannelId = null;
             _channelChat = null;
+            _channelMembers = [];
+            _activeChannelName = null;
             ChannelBar.IsVisible = false;
             ChannelPttLabel.IsVisible = false;
             _chatItems = [];
@@ -564,9 +574,9 @@ namespace MassangerMaximka
 
         private void SetChannelVoiceEndPoints()
         {
-            if (_voice == null || _channelService == null) return;
+            if (_voice == null) return;
             var extras = new List<System.Net.IPEndPoint>();
-            foreach (var m in _channelService.Members.Where(m => m != _localNodeId))
+            foreach (var m in _channelMembers.Where(m => m != _localNodeId))
             {
                 if (_peerEndpointMap.TryGetValue(m, out var tcpEp))
                 {
@@ -677,10 +687,9 @@ namespace MassangerMaximka
             if (string.IsNullOrEmpty(text) || _chat == null) return;
             MessageEntry.Text = "";
 
-            if (_activeChannelId != null && _channelService != null)
+            if (_activeChannelId != null && _channelMembers.Count > 0)
             {
-                var members = _channelService.Members;
-                foreach (var m in members.Where(m => m != _localNodeId))
+                foreach (var m in _channelMembers.Where(m => m != _localNodeId))
                 {
                     TechLog(LogCat.Transport, $"CHANNEL SEND to={m} len={text.Length}");
                     var msg = await _chat.SendMessageAsync(m, text);
@@ -1143,9 +1152,9 @@ namespace MassangerMaximka
 
         private void BroadcastPttSignal(string signal)
         {
-            if (_activeChannelId != null && _channelService != null)
+            if (_activeChannelId != null && _channelMembers.Count > 0)
             {
-                foreach (var m in _channelService.Members.Where(m => m != _localNodeId))
+                foreach (var m in _channelMembers.Where(m => m != _localNodeId))
                     _ = SendCallSignalAsync(m, signal);
             }
             else
