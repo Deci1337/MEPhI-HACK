@@ -11,7 +11,7 @@
 ## Видео-демонстрация
 
 [ВИДЕО-ДЕМОНСТРАЦИЯ](https://drive.google.com/file/d/1TAun2sH_EOAJMRvUShmzoJ4Cl-zAl6W-/view?usp=drive_link)
-Презентация](https://docs.google.com/presentation/d/1b5-BQ1OWlaZ9vM3kSvL7aPGpnxDgJAAw/edit?usp=drive_link&ouid=101306185577228912867&rtpof=true&sd=true)
+[Презентация](https://docs.google.com/presentation/d/1b5-BQ1OWlaZ9vM3kSvL7aPGpnxDgJAAw/edit?usp=drive_link&ouid=101306185577228912867&rtpof=true&sd=true)
 
 ## 🌟 Ключевые возможности
 
